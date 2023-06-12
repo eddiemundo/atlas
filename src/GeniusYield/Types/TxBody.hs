@@ -30,6 +30,7 @@ module GeniusYield.Types.TxBody (
     txBodyCollateralReturnOutput,
     txBodyCollateralReturnOutputValue,
     txBodyTotalCollateralLovelace,
+    txBodyRequiredExtraWitnesses,
     getTxBody,
 ) where
 
@@ -46,6 +47,7 @@ import           GeniusYield.Types.Tx
 import           GeniusYield.Types.TxOutRef
 import           GeniusYield.Types.UTxO
 import           GeniusYield.Types.Value
+import GeniusYield.Types.PubKeyHash (GYPubKeyHash, pubKeyHashFromApi)
 
 -- | Transaction body: the part which is then signed.
 newtype GYTxBody = GYTxBody (Api.TxBody Api.BabbageEra)
@@ -68,6 +70,12 @@ makeSignedTransaction txWit (GYTxBody txBody) = txFromApi $ Api.makeSignedTransa
 -- | Create an unsigned transaction from the body.
 unsignedTx :: GYTxBody -> GYTx
 unsignedTx (GYTxBody body) = txFromApi (Api.Tx body [])
+
+txBodyRequiredExtraWitnesses :: GYTxBody -> [GYPubKeyHash]
+txBodyRequiredExtraWitnesses (GYTxBody (Api.TxBody Api.TxBodyContent{ Api.txExtraKeyWits })) =
+  case txExtraKeyWits of
+    Api.TxExtraKeyWitnessesNone -> []
+    Api.TxExtraKeyWitnesses _ pkhs -> fmap pubKeyHashFromApi pkhs
 
 -- | Return the fees in lovelace.
 txBodyFee :: GYTxBody -> Integer
