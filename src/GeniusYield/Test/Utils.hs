@@ -118,7 +118,7 @@ fakeIron = fromFakeCoin $ FakeCoin "Iron"
 -}
 testRun :: String -> (Wallets -> Run a) -> Tasty.TestTree
 testRun name run = do
-    testNoErrorsTrace v defaultBabbage name $ do
+    testNoErrorsTrace v (warnLimits defaultBabbage) name $ do
         ws <- evalRandT wallets pureGen
         run ws
   where
