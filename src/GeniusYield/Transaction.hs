@@ -88,6 +88,7 @@ import           GeniusYield.Imports
 import           GeniusYield.Transaction.CoinSelection
 import           GeniusYield.Transaction.Common
 import           GeniusYield.Types
+import Debug.Trace (trace)
 
 -- | A container for various network parameters, and user wallet information, used by balancer.
 data GYBuildTxEnv = GYBuildTxEnv
@@ -280,7 +281,7 @@ balanceTxStep
                                             $ Api.S.protocolParamMaxValueSize pp
                     }
                 cstrat
-            pure (ins ++ addIns, collaterals, adjustedOuts ++ changeOuts)
+            pure (trace ("ins: " <> show (ins ++ addIns)) (ins ++ addIns), collaterals, adjustedOuts ++ changeOuts)
   where
     isScriptWitness GYTxInWitnessKey      = False
     isScriptWitness GYTxInWitnessScript{} = True
