@@ -423,10 +423,10 @@ finalizeGYBalancedTx
 
     body :: Api.TxBodyContent Api.BuildTx Api.BabbageEra
     body = Api.TxBodyContent
-        ins'
+        (trace ("body ins: " <> show ins') ins')
         collaterals'
         inRefs
-        outs'
+        (trace ("body outs: " <> show outs') outs')
         dummyTotCol
         dummyRetCol
         fee
