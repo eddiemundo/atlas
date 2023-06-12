@@ -18,6 +18,8 @@ module GeniusYield.TxBuilder.Run
     , ownAddress
     , sendSkeleton
     , sendSkeleton'
+    , sendSkeletonSignedWith
+    , sendSkeletonSignedWith'
     , networkIdRun
     ) where
 
@@ -231,7 +233,13 @@ sendSkeleton :: GYTxSkeleton v -> GYTxMonadRun GYTxId
 sendSkeleton skeleton = snd <$> sendSkeleton' skeleton
 
 sendSkeleton' :: GYTxSkeleton v -> GYTxMonadRun (Tx, GYTxId)
-sendSkeleton' skeleton = do
+sendSkeleton' = sendSkeletonSignedWith' []
+
+sendSkeletonSignedWith :: [GYPaymentSigningKey] -> GYTxSkeleton v -> GYTxMonadRun GYTxId
+sendSkeletonSignedWith skeys skeleton = snd <$> sendSkeletonSignedWith' skeys skeleton
+
+sendSkeletonSignedWith' :: [GYPaymentSigningKey] -> GYTxSkeleton v -> GYTxMonadRun (Tx, GYTxId)
+sendSkeletonSignedWith' extraSkeys skeleton = do
     w <- asks runEnvWallet
     let skey = walletPaymentSigningKey w
     body <- skeletonToTxBody skeleton
@@ -241,9 +249,11 @@ sendSkeleton' skeleton = do
 
     let pkh     = pubKeyHashToPlutus $ pubKeyHash $ paymentVerificationKey skey
         keyPair = paymentSigningKeyToLedgerKeyPair skey
+        extraPkhs = pubKeyHashToPlutus . pubKeyHash . paymentVerificationKey <$> extraSkeys
+        extraKeyPairs = paymentSigningKeyToLedgerKeyPair <$> extraSkeys
         tx1     =
             toExtra (mempty
-                { Fork.txSignatures = Map.singleton pkh keyPair
+                { Fork.txSignatures = Map.fromList $ (pkh, keyPair) : zip extraPkhs extraKeyPairs
                 , Fork.txValidRange       = case txBodyValidityRange body of
                     (Nothing, Nothing) -> Plutus.always
                     (Nothing, Just ub) -> Plutus.to $ slot ub
