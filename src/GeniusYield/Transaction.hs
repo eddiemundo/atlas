@@ -433,7 +433,7 @@ finalizeGYBalancedTx
         (lb', ub')
         Api.TxMetadataNone
         Api.TxAuxScriptsNone
-        extra
+        (trace ("extraSigners: " <> show extra) extra)
         (Api.BuildTxWith $ Just pp)
         Api.TxWithdrawalsNone
         Api.TxCertificatesNone
