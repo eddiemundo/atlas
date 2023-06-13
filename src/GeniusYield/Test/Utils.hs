@@ -11,6 +11,7 @@ Stability   : develop
 module GeniusYield.Test.Utils
     ( Run
     , testRun
+    , testRun'
     , Wallet (..)
     , Wallets (..)
     , newWallet
@@ -117,8 +118,11 @@ fakeIron = fromFakeCoin $ FakeCoin "Iron"
      errors.
 -}
 testRun :: String -> (Wallets -> Run a) -> Tasty.TestTree
-testRun name run = do
-    testNoErrorsTrace v (warnLimits defaultBabbage) name $ do
+testRun = testRun' id
+
+testRun' :: (MockConfig -> MockConfig) -> String -> (Wallets -> Run a) -> Tasty.TestTree
+testRun' updateMockConfig name run = do
+    testNoErrorsTrace v (updateMockConfig defaultBabbage) name $ do
         ws <- evalRandT wallets pureGen
         run ws
   where
@@ -246,7 +250,7 @@ withWalletBalancesCheckSimple wallValueDiffs m = do
             Just (extraLovelaceForFees, extraLovelaceForMinAda) -> b' <> valueFromLovelace (coerce $ extraLovelaceForFees <> extraLovelaceForMinAda)
           diff = newBalance `valueMinus` b
         in unless (diff == v) $ fail $
-            printf "Wallet: %s. Old balance: %s. New balance: %s. New balance after adding extra lovelaces %s. Expected balance difference of %s, but the actual difference was %s" (walletName w) b b' newBalance v diff 
+            printf "Wallet: %s. Old balance: %s. New balance: %s. New balance after adding extra lovelaces %s. Expected balance difference of %s, but the actual difference was %s" (walletName w) b b' newBalance v diff
   return a
 
 -- | Given a wallet returns its balance.
