@@ -20,6 +20,7 @@ module GeniusYield.TxBuilder.Run
     , sendSkeleton'
     , sendSkeletonSignedWith
     , sendSkeletonSignedWith'
+    , sendSkeletonWithWallets
     , networkIdRun
     ) where
 
@@ -229,19 +230,20 @@ instance GYTxMonad GYTxMonadRun where
 
     randSeed = return 42
 
-sendSkeleton :: GYTxSkeleton v -> GYTxMonadRun GYTxId
-sendSkeleton skeleton = snd <$> sendSkeleton' skeleton
+-- Send skeletons with multiple signatures from wallet
+sendSkeletonWithWallets :: GYTxSkeleton v -> [Wallet] -> GYTxMonadRun GYTxId
+sendSkeletonWithWallets skeleton ws = snd <$> sendSkeleton' skeleton ws
 
 sendSkeleton' :: GYTxSkeleton v -> GYTxMonadRun (Tx, GYTxId)
-sendSkeleton' = sendSkeletonSignedWith' []
+sendSkeleton' = sendSkeletonSignedWith' [] []
 
 sendSkeletonSignedWith :: [GYPaymentSigningKey] -> GYTxSkeleton v -> GYTxMonadRun GYTxId
 sendSkeletonSignedWith skeys skeleton = snd <$> sendSkeletonSignedWith' skeys skeleton
 
-sendSkeletonSignedWith' :: [GYPaymentSigningKey] -> GYTxSkeleton v -> GYTxMonadRun (Tx, GYTxId)
+sendSkeletonSignedWith' :: [GYPaymentSigningKey] -> [Wallet] -> GYTxSkeleton v -> GYTxMonadRun (Tx, GYTxId)
 sendSkeletonSignedWith' extraSkeys skeleton = do
     w <- asks runEnvWallet
-    let skey = walletPaymentSigningKey w
+    let sigs = walletSignatures (w:ws)
     body <- skeletonToTxBody skeleton
     pp <- protocolParameters
     modify (updateWalletState w pp body)
@@ -253,7 +255,7 @@ sendSkeletonSignedWith' extraSkeys skeleton = do
         extraKeyPairs = paymentSigningKeyToLedgerKeyPair <$> extraSkeys
         tx1     =
             toExtra (mempty
-                { Fork.txSignatures = Map.fromList $ (pkh, keyPair) : zip extraPkhs extraKeyPairs
+                { Fork.txSignatures = Map.fromList $ (pkh, keyPair) : zip extraPkhs extraKeyPairs <> sigs
                 , Fork.txValidRange       = case txBodyValidityRange body of
                     (Nothing, Nothing) -> Plutus.always
                     (Nothing, Just ub) -> Plutus.to $ slot ub
@@ -278,6 +280,11 @@ sendSkeletonSignedWith' extraSkeys skeleton = do
             Just tid' -> return (tx5, tid')
 
   where
+    walletSignatures =
+      let walletPubKeyHash = pubKeyHashToPlutus . pubKeyHash . paymentVerificationKey . walletPaymentSigningKey
+          walletKeyPair = paymentSigningKeyToLedgerKeyPair . walletPaymentSigningKey
+       in Map.fromList . map (\w -> (walletPubKeyHash w, walletKeyPair w))
+
 
     -- Updates the wallet state.
     -- Updates extra lovelace required for fees & minimum ada requirements against the wallet sending this transaction.
@@ -519,4 +526,3 @@ eraHistory = do
             , eraEnd = Ouroboros.EraUnbounded
             , eraParams = Ouroboros.EraParams {eraEpochSize = 86400, eraSlotLength = mkSlotLength len, eraSafeZone = Ouroboros.StandardSafeZone 25920}
             }
-
