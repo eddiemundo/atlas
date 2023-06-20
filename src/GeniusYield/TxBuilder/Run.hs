@@ -234,14 +234,17 @@ instance GYTxMonad GYTxMonadRun where
 sendSkeletonWithWallets :: GYTxSkeleton v -> [Wallet] -> GYTxMonadRun GYTxId
 sendSkeletonWithWallets skeleton ws = snd <$> sendSkeleton' skeleton ws
 
-sendSkeleton' :: GYTxSkeleton v -> GYTxMonadRun (Tx, GYTxId)
-sendSkeleton' = sendSkeletonSignedWith' [] []
+sendSkeleton' :: GYTxSkeleton v -> [Wallet] -> GYTxMonadRun (Tx, GYTxId)
+sendSkeleton' skeleton wallets = sendSkeletonSignedWith' [] wallets skeleton
+
+sendSkeleton :: GYTxSkeleton v -> GYTxMonadRun GYTxId
+sendSkeleton = fmap snd . sendSkeletonSignedWith' [] []
 
 sendSkeletonSignedWith :: [GYPaymentSigningKey] -> GYTxSkeleton v -> GYTxMonadRun GYTxId
-sendSkeletonSignedWith skeys skeleton = snd <$> sendSkeletonSignedWith' skeys skeleton
+sendSkeletonSignedWith skeys skeleton = snd <$> sendSkeletonSignedWith' skeys [] skeleton
 
 sendSkeletonSignedWith' :: [GYPaymentSigningKey] -> [Wallet] -> GYTxSkeleton v -> GYTxMonadRun (Tx, GYTxId)
-sendSkeletonSignedWith' extraSkeys skeleton = do
+sendSkeletonSignedWith' extraSkeys ws skeleton = do
     w <- asks runEnvWallet
     let sigs = walletSignatures (w:ws)
     body <- skeletonToTxBody skeleton
@@ -249,13 +252,12 @@ sendSkeletonSignedWith' extraSkeys skeleton = do
     modify (updateWalletState w pp body)
     dumpBody body
 
-    let pkh     = pubKeyHashToPlutus $ pubKeyHash $ paymentVerificationKey skey
-        keyPair = paymentSigningKeyToLedgerKeyPair skey
+    let
         extraPkhs = pubKeyHashToPlutus . pubKeyHash . paymentVerificationKey <$> extraSkeys
         extraKeyPairs = paymentSigningKeyToLedgerKeyPair <$> extraSkeys
         tx1     =
             toExtra (mempty
-                { Fork.txSignatures = Map.fromList $ (pkh, keyPair) : zip extraPkhs extraKeyPairs <> sigs
+                { Fork.txSignatures = Map.fromList (zip extraPkhs extraKeyPairs) <> sigs
                 , Fork.txValidRange       = case txBodyValidityRange body of
                     (Nothing, Nothing) -> Plutus.always
                     (Nothing, Just ub) -> Plutus.to $ slot ub
