@@ -283,7 +283,7 @@ balanceTxStep
                                             $ Api.S.protocolParamMaxValueSize pp
                     }
                 cstrat
-            pure (trace ("ins: " <> show (ins ++ addIns)) (ins ++ addIns), collaterals, adjustedOuts ++ changeOuts)
+            pure (ins ++ addIns, collaterals, adjustedOuts ++ changeOuts)
   where
     isScriptWitness GYTxInWitnessKey      = False
     isScriptWitness GYTxInWitnessScript{} = True
@@ -425,17 +425,17 @@ finalizeGYBalancedTx
 
     body :: Api.TxBodyContent Api.BuildTx Api.BabbageEra
     body = Api.TxBodyContent
-        (trace ("body ins: " <> show ins') ins')
+        ins'
         collaterals'
         inRefs
-        (trace ("body outs: " <> show outs') outs')
+        outs'
         dummyTotCol
         dummyRetCol
         fee
         (lb', ub')
         Api.TxMetadataNone
         Api.TxAuxScriptsNone
-        (trace ("extraSigners: " <> show extra) extra)
+        extra
         (Api.BuildTxWith $ Just pp)
         Api.TxWithdrawalsNone
         Api.TxCertificatesNone
