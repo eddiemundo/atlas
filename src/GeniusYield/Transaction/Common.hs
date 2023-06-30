@@ -40,22 +40,22 @@ data GYBalancedTx v = GYBalancedTx
 
 -- | A further detailed version of 'GYTxIn', containing all information about a UTxO.
 data GYTxInDetailed v = GYTxInDetailed
-    { gyTxInDet          :: GYTxIn v
-    , gyTxInDetAddress   :: GYAddress
-    , gyTxInDetValue     :: GYValue
+    { gyTxInDet          :: !(GYTxIn v)
+    , gyTxInDetAddress   :: !GYAddress
+    , gyTxInDetValue     :: !GYValue
     {- When a GYUTxO is converted to a GYTxInDetailed (and back again later), this field preserves the ref script
     attached to the UTxO (potentially so other inputs can refer to the script). -}
-    , gyTxInDetScriptRef :: Maybe (Some GYScript)
+    , gyTxInDetScriptRef :: !(Maybe (Some GYScript))
 
     -- | Did GYUtXo had inline datum?
-    , gyTxInDetInlineDat :: Bool
+    , gyTxInDetInlineDat :: !Bool
     }
   deriving (Eq, Show)
 
 data BalancingError
-    = BalancingErrorInsufficientFunds GYValue
-    | forall v. BalancingErrorNonPositiveTxOut (GYTxOut v)
-    | BalancingErrorChangeShortFall Natural
+    = BalancingErrorInsufficientFunds !GYValue
+    | forall v. BalancingErrorNonPositiveTxOut !(GYTxOut v)
+    | BalancingErrorChangeShortFall !Natural
     -- ^ Lovelace shortfall in constructing a change output. See: "Cardano.CoinSelection.Balance.UnableToConstructChangeError"
     | BalancingErrorEmptyOwnUTxOs
     -- ^ User wallet has no utxos to select.
@@ -66,16 +66,16 @@ instance Eq BalancingError where
     BalancingErrorInsufficientFunds v1 == BalancingErrorInsufficientFunds v2 = v1 == v2
     BalancingErrorChangeShortFall n1 == BalancingErrorChangeShortFall n2 = n1 == n2
     BalancingErrorEmptyOwnUTxOs == BalancingErrorEmptyOwnUTxOs = True
-    BalancingErrorNonPositiveTxOut out1 == BalancingErrorNonPositiveTxOut out2 = txOutToApi True out1 == txOutToApi True out2
+    BalancingErrorNonPositiveTxOut out1 == BalancingErrorNonPositiveTxOut out2 = txOutToApi out1 == txOutToApi out2
     _ == _ = False
 
 -------------------------------------------------------------------------------
 -- Transaction Utilities
 -------------------------------------------------------------------------------
 
-minimumUTxO :: Bool -> Api.S.ProtocolParameters -> GYTxOut v -> Natural
-minimumUTxO useInlineDatums pp txOut = do
-    case Api.calculateMinimumUTxO Api.ShelleyBasedEraBabbage (txOutToApi useInlineDatums txOut) pp of
+minimumUTxO :: Api.S.ProtocolParameters -> GYTxOut v -> Natural
+minimumUTxO pp txOut = do
+    case Api.calculateMinimumUTxO Api.ShelleyBasedEraBabbage (txOutToApi txOut) pp of
         -- This function can only ever fail if the protocol params doesn't contain the min ada value.
         Left err -> error
             $ "minimumUTxO: Protocol Params missing minimum UTxO value; Original error: " ++ show err
