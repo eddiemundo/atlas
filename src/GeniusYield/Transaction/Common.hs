@@ -21,6 +21,7 @@ import qualified Cardano.Api.Shelley as Api.S
 
 import           GeniusYield.Imports
 import           GeniusYield.Types
+import           GeniusYield.Types.TxMetadata (GYTxMetadata)
 
 {- | An *almost* finalized Tx.
 
@@ -36,6 +37,7 @@ data GYBalancedTx v = GYBalancedTx
     , gybtxInvalidAfter  :: !(Maybe GYSlot)
     , gybtxSigners       :: !(Set GYPubKeyHash)
     , gybtxRefIns        :: !GYUTxOs
+    , gybtxMetadata      :: !(Maybe GYTxMetadata)
     }
 
 -- | A further detailed version of 'GYTxIn', containing all information about a UTxO.

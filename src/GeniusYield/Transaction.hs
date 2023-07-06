@@ -83,6 +83,7 @@ import           GeniusYield.Transaction.CoinSelection
 import           GeniusYield.Transaction.Common
 import           GeniusYield.Types
 import Debug.Trace (trace)
+import GeniusYield.Types.TxMetadata (GYTxMetadata(GYTxMetadata))
 
 -- | A container for various network parameters, and user wallet information, used by balancer.
 data GYBuildTxEnv = GYBuildTxEnv
@@ -160,8 +161,9 @@ buildUnsignedTxBody :: forall m v.
         -> Maybe GYSlot
         -> Maybe GYSlot
         -> Set GYPubKeyHash
+        -> Maybe GYTxMetadata
         -> m (Either BuildTxException GYTxBody)
-buildUnsignedTxBody env cstrat insOld outsOld refIns mmint lb ub signers = buildTxLoop cstrat extraLovelaceStart
+buildUnsignedTxBody env cstrat insOld outsOld refIns mmint lb ub signers mbTxMetadata = buildTxLoop cstrat extraLovelaceStart
   where
 
     step :: GYCoinSelectionStrategy -> Natural -> m (Either BuildTxException ([GYTxInDetailed v], GYUTxOs, [GYTxOut v]))
@@ -219,6 +221,7 @@ buildUnsignedTxBody env cstrat insOld outsOld refIns mmint lb ub signers = build
                     , gybtxInvalidAfter  = ub
                     , gybtxSigners       = signers
                     , gybtxRefIns        = refIns
+                    , gybtxMetadata      = mbTxMetadata
                     }
 
     retryIfRandomImprove GYRandomImproveMultiAsset n _ = buildTxLoop GYLargestFirstMultiAsset (if n == extraLovelaceStart then extraLovelaceStart else n `div` 2)
@@ -309,6 +312,7 @@ finalizeGYBalancedTx
         , gybtxInvalidAfter  = ub
         , gybtxSigners       = signers
         , gybtxRefIns        = utxosRefInputs
+        , gybtxMetadata      = mbTxMetadata
         }
     = makeTransactionBodyAutoBalanceWrapper
         collaterals
@@ -421,6 +425,9 @@ finalizeGYBalancedTx
         collateralTotalValue :: GYValue
         collateralTotalValue = foldMapUTxOs utxoValue collaterals
 
+    txMetadata :: Api.TxMetadataInEra Api.BabbageEra
+    txMetadata = maybe Api.TxMetadataNone coerce mbTxMetadata
+
     body :: Api.TxBodyContent Api.BuildTx Api.BabbageEra
     body = Api.TxBodyContent
         ins'
@@ -431,7 +438,7 @@ finalizeGYBalancedTx
         dummyRetCol
         fee
         (lb', ub')
-        Api.TxMetadataNone
+        txMetadata
         Api.TxAuxScriptsNone
         extra
         (Api.BuildTxWith $ Just pp)
