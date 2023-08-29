@@ -68,7 +68,7 @@ module GeniusYield.Types.Value (
     makeAssetClass
 ) where
 
-import           Control.Lens                     ((&), (.~), (?~))
+import           Control.Lens                     ((.~), (?~))
 import           Data.Aeson                       (object, (.=))
 import qualified Data.Aeson.Key                   as K
 import qualified Data.Aeson.KeyMap                as KM
@@ -413,7 +413,11 @@ isEmptyValue (GYValue m) = Map.null m
 data GYAssetClass = GYLovelace | GYToken GYMintingPolicyId GYTokenName
   deriving stock (Show, Eq, Ord, Generic)
 
-instance Aeson.ToJSONKey GYAssetClass
+instance Aeson.ToJSONKey GYAssetClass where
+    toJSONKey = Aeson.toJSONKeyText Web.toUrlPiece
+
+instance Aeson.FromJSONKey GYAssetClass where
+    fromJSONKey = Aeson.FromJSONKeyTextParser (either (fail . show) pure . Web.parseUrlPiece)
 
 instance Swagger.ToSchema GYAssetClass where
   declareNamedSchema _ = do

@@ -17,6 +17,7 @@ module GeniusYield.Types.TxOutRef (
     -- * Helpers
     showTxOutRef,
     txOutRefToTuple,
+    txOutRefToTuple',
     txOutRefFromTuple,
     -- * CBOR format
     GYTxOutRefCbor (..),
@@ -25,7 +26,7 @@ module GeniusYield.Types.TxOutRef (
 import qualified Cardano.Api                      as Api
 import qualified Codec.CBOR.Read                  as CBOR
 import qualified Codec.CBOR.Term                  as CBOR
-import           Control.Lens                     ((&), (?~))
+import           Control.Lens                     ((?~))
 import qualified Data.Aeson                       as Aeson
 import qualified Data.Attoparsec.ByteString.Char8 as Atto
 import qualified Data.ByteString.Base16           as Base16
@@ -122,6 +123,9 @@ txOutRefToApi = coerce
 
 txOutRefToTuple :: GYTxOutRef -> (GYTxId, Word)
 txOutRefToTuple (GYTxOutRef (Api.TxIn x (Api.TxIx y))) = (txIdFromApi x, y)
+
+txOutRefToTuple' :: GYTxOutRef -> (Text, Word)
+txOutRefToTuple' (GYTxOutRef (Api.TxIn x (Api.TxIx y))) = (Api.serialiseToRawBytesHexText x, y)
 
 txOutRefFromTuple :: (GYTxId, Word) -> GYTxOutRef
 txOutRefFromTuple (txIdToApi -> x, y) = GYTxOutRef (Api.TxIn x (Api.TxIx y))
