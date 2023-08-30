@@ -443,6 +443,15 @@ finalizeGYBalancedTx
     txMetadata :: Api.TxMetadataInEra Api.BabbageEra
     txMetadata = maybe Api.TxMetadataNone coerce mbTxMetadata
 
+    -- Adding empty script so that CML will use Alonzo encoding of aux data
+    txAuxScripts :: Api.TxAuxScripts Api.BabbageEra
+    txAuxScripts =
+      Api.TxAuxScripts
+        Api.AuxScriptsInBabbageEra
+        [Api.ScriptInEra Api.PlutusScriptV1InBabbage
+          $ Api.PlutusScript Api.PlutusScriptV1
+          $ Api.S.PlutusScriptSerialised mempty]
+
     body :: Api.TxBodyContent Api.BuildTx Api.BabbageEra
     body = Api.TxBodyContent
         ins'
@@ -454,7 +463,7 @@ finalizeGYBalancedTx
         fee
         (lb', ub')
         txMetadata
-        Api.TxAuxScriptsNone
+        txAuxScripts
         extra
         (Api.BuildTxWith $ Just pp)
         Api.TxWithdrawalsNone
