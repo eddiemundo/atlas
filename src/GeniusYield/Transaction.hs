@@ -63,6 +63,8 @@ import           Control.Monad.Trans.Except            (runExceptT, throwE)
 import           Data.Foldable                         (for_)
 import           Data.List                             (nub)
 import qualified Data.Map                              as Map
+import qualified Data.ByteString.Base16                as Base16
+import qualified Data.ByteString.Short                 as SBS
 import           Data.Ratio                            ((%))
 import           GHC.Records                           (getField)
 
@@ -450,7 +452,9 @@ finalizeGYBalancedTx
         Api.AuxScriptsInBabbageEra
         [Api.ScriptInEra Api.PlutusScriptV1InBabbage
           $ Api.PlutusScript Api.PlutusScriptV1
-          $ Api.S.PlutusScriptSerialised mempty]
+          $ Api.S.PlutusScriptSerialised 
+          $ SBS.toShort
+          $ Base16.decodeLenient "4f010000322253330034a22930b2b9a1"]
 
     body :: Api.TxBodyContent Api.BuildTx Api.BabbageEra
     body = Api.TxBodyContent
