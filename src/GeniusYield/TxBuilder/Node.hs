@@ -85,6 +85,9 @@ instance GYTxQueryMonad GYTxMonadNode where
     utxosAtAddresses addrs = GYTxMonadNode $ \env ->
         gyQueryUtxosAtAddresses (envProviders env) addrs
 
+    utxosAtPaymentCredential cred = GYTxMonadNode $ \env ->
+        gyQueryUtxosAtPaymentCredential (envProviders env) cred
+
     utxosAtAddressesWithDatums addrs = GYTxMonadNode $ \env ->
         gyQueryUtxosAtAddressesWithDatums (envProviders env) addrs
 
@@ -103,8 +106,8 @@ instance GYTxQueryMonad GYTxMonadNode where
     slotConfig = GYTxMonadNode $ \env ->
         gyGetSlotConfig (envProviders env)
 
-    currentSlot = GYTxMonadNode $ \env ->
-        gyGetCurrentSlot (envProviders env)
+    slotOfCurrentBlock = GYTxMonadNode $ \env ->
+        gyGetSlotOfCurrentBlock (envProviders env)
 
     logMsg ns s msg = GYTxMonadNode $ \env ->
         gyLog (envProviders env) ns s msg
@@ -309,9 +312,13 @@ runGYTxMonadNodeCore ownUtxoUpdateF cstrat nid providers addrs change collateral
     pp          <- gyGetProtocolParameters providers
     ps          <- gyGetStakePools providers
 
+    bpp <- case Api.bundleProtocolParams Api.BabbageEra pp of
+                Left e     -> throwIO $ BuildTxPPConversionError e
+                Right bpp' -> pure bpp'
+
     collateral' <- obtainCollateral
 
-    e <- unGYTxMonadNode (buildTxCore ss eh pp ps cstrat ownUtxoUpdateF addrs change collateral' loggedAction) GYTxNodeEnv
+    e <- unGYTxMonadNode (buildTxCore ss eh bpp ps cstrat ownUtxoUpdateF addrs change collateral' loggedAction) GYTxNodeEnv
             { envNid           = nid
             , envProviders     = providers
             , envAddrs         = addrs

@@ -76,8 +76,11 @@ import qualified Data.Map.Strict              as Map
 import           Data.Maybe                   (listToMaybe)
 import qualified Data.Set                     as Set
 import qualified Data.Text                    as Txt
-import qualified Plutus.V1.Ledger.Api         as Plutus
-import qualified Plutus.V1.Ledger.Value       as PlutusValue
+import qualified PlutusLedgerApi.V1           as Plutus (Address, DatumHash,
+                                                         FromData (..),
+                                                         PubKeyHash, TokenName,
+                                                         TxOutRef, Value)
+import qualified PlutusLedgerApi.V1.Value     as Plutus (AssetClass)
 
 import           GeniusYield.Imports
 import           GeniusYield.TxBuilder.Errors
@@ -89,7 +92,7 @@ import           GeniusYield.Types
 
 -- | Class of monads for querying chain data.
 class MonadError GYTxMonadException m => GYTxQueryMonad m where
-    {-# MINIMAL networkId, lookupDatum, (utxoAtTxOutRef | utxosAtTxOutRefs), (utxosAtAddress | utxosAtAddresses), slotConfig, currentSlot, logMsg #-}
+    {-# MINIMAL networkId, lookupDatum, (utxoAtTxOutRef | utxosAtTxOutRefs), (utxosAtAddress | utxosAtAddresses), utxosAtPaymentCredential, slotConfig, slotOfCurrentBlock, logMsg #-}
 
     -- | Get the network id
     networkId :: m GYNetworkId
@@ -137,14 +140,18 @@ class MonadError GYTxMonadException m => GYTxQueryMonad m where
     utxoRefsAtAddress :: GYAddress -> m [GYTxOutRef]
     utxoRefsAtAddress = fmap (Map.keys . mapUTxOs id) . utxosAtAddress
 
+    utxosAtPaymentCredential :: GYPaymentCredential -> m (Maybe GYUTxOs)
+
     {- | Obtain the slot config for the network.
 
     Implementations using era history to create slot config may raise 'GYEraSummariesToSlotConfigError'.
     -}
     slotConfig :: m GYSlotConfig
 
-    -- | Lookup the current 'GYSlot'.
-    currentSlot :: m GYSlot
+    -- | This is expected to give the slot of the latest block. We say "expected" as we cache the result for 5 seconds, that is to say, suppose slot was cached at time @T@, now if query for current block's slot comes within time duration @(T, T + 5)@, then we'll return the cached slot but if say, query happened at time @(T + 5, T + 21)@ where @21@ was taken as an arbitrary number above 5, then we'll query the chain tip and get the slot of the latest block seen by the provider and then store it in our cache, thus new cached value would be served for requests coming within time interval of @(T + 21, T + 26)@.
+    --
+    -- __NOTE:__ It's behaviour is slightly different, solely for our plutus simple model provider where it actually returns the value of the @currentSlot@ variable maintained inside plutus simple model library.
+    slotOfCurrentBlock :: m GYSlot
 
     -- | Log a message with specified namespace and severity.
     logMsg :: HasCallStack => GYLogNamespace -> GYLogSeverity -> String -> m ()
@@ -176,8 +183,9 @@ instance GYTxQueryMonad m => GYTxQueryMonad (RandT g m) where
     utxosAtAddresses = lift . utxosAtAddresses
     utxosAtAddressesWithDatums = lift . utxosAtAddressesWithDatums
     utxoRefsAtAddress = lift . utxoRefsAtAddress
+    utxosAtPaymentCredential = lift . utxosAtPaymentCredential
     slotConfig = lift slotConfig
-    currentSlot = lift currentSlot
+    slotOfCurrentBlock = lift slotOfCurrentBlock
     logMsg ns s = lift . logMsg ns s
 
 instance GYTxMonad m => GYTxMonad (RandT g m) where
@@ -196,8 +204,9 @@ instance GYTxQueryMonad m => GYTxQueryMonad (ReaderT env m) where
     utxosAtAddresses = lift . utxosAtAddresses
     utxosAtAddressesWithDatums = lift . utxosAtAddressesWithDatums
     utxoRefsAtAddress = lift . utxoRefsAtAddress
+    utxosAtPaymentCredential = lift . utxosAtPaymentCredential
     slotConfig = lift slotConfig
-    currentSlot = lift currentSlot
+    slotOfCurrentBlock = lift slotOfCurrentBlock
     logMsg ns s = lift . logMsg ns s
 
 instance GYTxMonad m => GYTxMonad (ReaderT g m) where
@@ -216,8 +225,9 @@ instance GYTxQueryMonad m => GYTxQueryMonad (ExceptT GYTxMonadException m) where
     utxosAtAddresses = lift . utxosAtAddresses
     utxosAtAddressesWithDatums = lift . utxosAtAddressesWithDatums
     utxoRefsAtAddress = lift . utxoRefsAtAddress
+    utxosAtPaymentCredential = lift . utxosAtPaymentCredential
     slotConfig = lift slotConfig
-    currentSlot = lift currentSlot
+    slotOfCurrentBlock = lift slotOfCurrentBlock
     logMsg ns s = lift . logMsg ns s
 
 instance GYTxMonad m => GYTxMonad (ExceptT GYTxMonadException m) where
@@ -439,7 +449,7 @@ valueFromPlutus' val = either
 -- | Convert a 'Plutus.Value' to 'GYValue' in 'IO'.
 --
 -- Throw 'GYConversionException' if conversion fails.
-valueFromPlutusIO :: PlutusValue.Value -> IO GYValue
+valueFromPlutusIO :: Plutus.Value -> IO GYValue
 valueFromPlutusIO val = either
     (throwIO . GYConversionException . flip GYInvalidPlutusValue val)
     pure
@@ -463,10 +473,10 @@ makeAssetClassIO a b = either
     pure
     (makeAssetClass a b)
 
--- | Convert a 'PlutusValue.AssetClass' to 'GYAssetClass' in 'GYTxMonad'.
+-- | Convert a 'Plutus.AssetClass' to 'GYAssetClass' in 'GYTxMonad'.
 --
 -- Throw 'GYConversionException' if conversion fails.
-assetClassFromPlutus' :: MonadError GYTxMonadException m => PlutusValue.AssetClass -> m GYAssetClass
+assetClassFromPlutus' :: MonadError GYTxMonadException m => Plutus.AssetClass -> m GYAssetClass
 assetClassFromPlutus' x = either
     (throwError . GYConversionException . GYInvalidPlutusAsset)
     pure
@@ -475,7 +485,7 @@ assetClassFromPlutus' x = either
 -- | Convert a 'PlutusValue.TokenName' to 'GYTokenName' in 'GYTxMonad'.
 --
 -- Throw 'GYConversionException' if conversion fails.
-tokenNameFromPlutus' :: MonadError GYTxMonadException m => PlutusValue.TokenName -> m GYTokenName
+tokenNameFromPlutus' :: MonadError GYTxMonadException m => Plutus.TokenName -> m GYTokenName
 tokenNameFromPlutus' x = maybe
     (throwError . GYConversionException . GYInvalidPlutusAsset $ GYTokenNameTooBig x)
     pure

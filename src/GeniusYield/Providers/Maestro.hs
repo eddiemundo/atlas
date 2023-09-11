@@ -10,8 +10,8 @@ Stability   : develop
 module GeniusYield.Providers.Maestro
   ( networkIdToMaestroEnv
   , maestroSubmitTx
-  , maestroSlotActions
-  , maestroGetCurrentSlot
+  , maestroAwaitTxConfirmed
+  , maestroGetSlotOfCurrentBlock
   , utxoFromMaestro
   , maestroQueryUtxo
   , maestroProtocolParams
@@ -25,6 +25,7 @@ import qualified Cardano.Api                          as Api
 import qualified Cardano.Api.Shelley                  as Api.S
 import qualified Cardano.Slotting.Slot                as CSlot
 import qualified Cardano.Slotting.Time                as CTime
+import           Control.Concurrent                   (threadDelay)
 import           Control.Exception                    (try)
 import           Control.Monad                        ((<=<))
 import qualified Data.Aeson                           as Aeson
@@ -36,11 +37,11 @@ import qualified Data.Set                             as Set
 import qualified Data.Text                            as Text
 import qualified Data.Text.Encoding                   as Text
 import qualified Data.Time                            as Time
-import           GHC.Natural                          (wordToNatural)
 import           GeniusYield.Imports
 import           GeniusYield.Providers.Common
 import           GeniusYield.Providers.SubmitApi      (SubmitTxException (..))
 import           GeniusYield.Types
+import           GHC.Natural                          (wordToNatural)
 import qualified Maestro.Client.V1                    as Maestro
 import qualified Maestro.Types.V1                     as Maestro
 import qualified Ouroboros.Consensus.HardFork.History as Ouroboros
@@ -49,7 +50,7 @@ import qualified Web.HttpApiData                      as Web
 
 -- | Convert our representation of Network ID to Maestro's.
 networkIdToMaestroEnv :: Text -> GYNetworkId -> IO (Maestro.MaestroEnv 'Maestro.V1)
-networkIdToMaestroEnv key nid = Maestro.mkMaestroEnv @'Maestro.V1 key $ fromMaybe (error "Only preprod and mainnet networks are supported by Maestro") $ M.lookup nid $ M.fromList [(GYMainnet, Maestro.Mainnet), (GYTestnetPreprod, Maestro.Preprod)]
+networkIdToMaestroEnv key nid = Maestro.mkMaestroEnv @'Maestro.V1 key $ fromMaybe (error "Only preview, preprod and mainnet networks are supported by Maestro") $ M.lookup nid $ M.fromList [(GYMainnet, Maestro.Mainnet), (GYTestnetPreprod, Maestro.Preprod), (GYTestnetPreview, Maestro.Preview)]
 
 -- | Exceptions.
 data MaestroProviderException
@@ -64,9 +65,13 @@ data MaestroProviderException
   deriving stock (Eq, Show)
   deriving anyclass (Exception)
 
+throwMspvApiError :: Text -> Maestro.MaestroError -> IO a
+throwMspvApiError locationInfo =
+    throwIO . MspvApiError locationInfo . silenceHeadersMaestroClientError
+
 -- | Utility function to handle Maestro errors, which also removes header (if present) so as to conceal API key.
 handleMaestroError :: Text -> Either Maestro.MaestroError a -> IO a
-handleMaestroError locationInfo = either (throwIO . MspvApiError locationInfo . silenceHeadersMaestroClientError) pure
+handleMaestroError locationInfo = either (throwMspvApiError locationInfo) pure
 
 -- | Remove headers (if `MaestroError` contains `ClientError`).
 silenceHeadersMaestroClientError :: Maestro.MaestroError -> Maestro.MaestroError
@@ -90,23 +95,66 @@ maestroSubmitTx env tx = do
     handleMaestroSubmitError = either (throwIO . SubmitTxException . Text.pack . show . silenceHeadersMaestroClientError) pure
 
 -------------------------------------------------------------------------------
+-- Await tx confirmation
+-------------------------------------------------------------------------------
+
+-- | Awaits for the confirmation of a given 'GYTxId'
+maestroAwaitTxConfirmed :: Maestro.MaestroEnv 'Maestro.V1 -> GYAwaitTx
+maestroAwaitTxConfirmed env p@GYAwaitTxParameters{..} txId = mspvAwaitTx 0
+  where
+    mspvAwaitTx :: Int -> IO ()
+    mspvAwaitTx attempt | maxAttempts <= attempt = throwIO $ GYAwaitTxException p
+    mspvAwaitTx attempt = do
+        eTxInfo <- maestroQueryTx env txId
+        case eTxInfo of
+            Left Maestro.MaestroNotFound -> threadDelay checkInterval >>
+                                            mspvAwaitTx (attempt + 1)
+            Left err -> throwMspvApiError "AwaitTx" err
+            Right txInfo -> msvpAwaitBlock attempt $
+                            Maestro._txDetailsBlockHash $
+                            Maestro.getTimestampedData txInfo
+
+    msvpAwaitBlock :: Int -> Maestro.BlockHash -> IO ()
+    msvpAwaitBlock attempt _ | maxAttempts <= attempt = throwIO $ GYAwaitTxException p
+    msvpAwaitBlock attempt blockHash = do
+        eBlockInfo <- maestroQueryBlock env blockHash
+        case eBlockInfo of
+            Left Maestro.MaestroNotFound -> threadDelay checkInterval >>
+                                            msvpAwaitBlock (attempt + 1) blockHash
+            Left err -> throwMspvApiError "AwaitBlock" err
+
+            Right (Maestro.getTimestampedData -> blockInfo) | attempt + 1 == maxAttempts ->
+                when (toInteger (Maestro._blockDetailsConfirmations blockInfo)
+                      <
+                      toInteger confirmations) $ throwIO $ GYAwaitTxException p
+
+            Right (Maestro.getTimestampedData -> blockInfo) ->
+                when (toInteger (Maestro._blockDetailsConfirmations blockInfo)
+                      <
+                      toInteger confirmations) $
+                threadDelay checkInterval >> msvpAwaitBlock (attempt + 1) blockHash
+
+maestroQueryBlock
+    :: Maestro.MaestroEnv 'Maestro.V1
+    -> Maestro.BlockHash
+    -> IO (Either Maestro.MaestroError Maestro.TimestampedBlockDetails)
+maestroQueryBlock env = try . Maestro.blockDetailsByHash env
+
+maestroQueryTx
+    :: Maestro.MaestroEnv 'Maestro.V1
+    -> GYTxId
+    -> IO (Either Maestro.MaestroError Maestro.TimestampedTxDetails)
+maestroQueryTx env = try . Maestro.txDetailsByHash env . Maestro.TxHash .
+                     Api.serialiseToRawBytesHexText . txIdToApi
+
+-------------------------------------------------------------------------------
 -- Slot actions
 -------------------------------------------------------------------------------
 
--- | Definition of 'GYSlotActions' for the Maestro provider.
-maestroSlotActions :: Maestro.MaestroEnv 'Maestro.V1 -> GYSlotActions
-maestroSlotActions env = GYSlotActions
-    { gyGetCurrentSlot'   = x
-    , gyWaitForNextBlock' = gyWaitForNextBlockDefault x
-    , gyWaitUntilSlot'    = gyWaitUntilSlotDefault x
-    }
-  where
-    x = maestroGetCurrentSlot env
-
 -- | Returns the current 'GYSlot'.
-maestroGetCurrentSlot :: Maestro.MaestroEnv 'Maestro.V1 -> IO GYSlot
-maestroGetCurrentSlot env =
-  try (Maestro.getChainTip env) >>= handleMaestroError "CurrentSlot" <&> slotFromApi . coerce . Maestro._chainTipSlot . Maestro.getTimestampedData
+maestroGetSlotOfCurrentBlock :: Maestro.MaestroEnv 'Maestro.V1 -> IO GYSlot
+maestroGetSlotOfCurrentBlock env =
+  try (Maestro.getChainTip env) >>= handleMaestroError "SlotOfCurrentBlock" <&> slotFromApi . coerce . Maestro._chainTipSlot . Maestro.getTimestampedData
 
 -------------------------------------------------------------------------------
 -- Query UTxO
@@ -120,7 +168,7 @@ datumHashFromMaestro = first (DeserializeErrorHex . Text.pack) . datumHashFromHe
 datumFromMaestroCBOR :: Text -> Either SomeDeserializeError GYDatum
 datumFromMaestroCBOR d = do
   bs  <- fromEither $ BS16.decode $ Text.encodeUtf8 d
-  api <- fromEither $ Api.deserialiseFromCBOR Api.AsScriptData bs
+  api <- fromEither $ Api.deserialiseFromCBOR Api.AsHashableScriptData bs
   return $ datumFromApi' api
   where
     e = DeserializeErrorHex d
@@ -223,6 +271,20 @@ maestroUtxosAtAddressesWithDatums env addrs = do
   where
     locationIdent = "AddressesUtxosWithDatums"
 
+-- | Query UTxOs present at payment credential.
+maestroUtxosAtPaymentCredential :: Maestro.MaestroEnv 'Maestro.V1 -> GYPaymentCredential -> IO GYUTxOs
+maestroUtxosAtPaymentCredential env paymentCredential = do
+  let paymentCredentialBech32 :: Maestro.Bech32StringOf Maestro.PaymentCredentialAddress = coerce $ paymentCredentialToBech32 paymentCredential
+  -- Here one would not get `MaestroNotFound` error.
+  utxos <- handleMaestroError locationIdent <=< try $ Maestro.allPages $ Maestro.utxosByPaymentCredential env paymentCredentialBech32 (Just False) (Just False)
+
+  either
+    (throwIO . MspvDeserializeFailure locationIdent)
+    pure
+    $ utxosFromList <$> traverse utxoFromMaestro utxos
+  where
+    locationIdent = "PaymentCredentialUtxos"
+
 -- | Returns a list containing all 'GYTxOutRef' for a given 'GYAddress'.
 maestroRefsAtAddress :: Maestro.MaestroEnv 'Maestro.V1 -> GYAddress -> IO [GYTxOutRef]
 maestroRefsAtAddress env addr = do
@@ -303,6 +365,7 @@ maestroQueryUtxo env = GYQueryUTxO
   , gyQueryUtxoAtTxOutRef'             = maestroUtxoAtTxOutRef env
   , gyQueryUtxoRefsAtAddress'          = maestroRefsAtAddress env
   , gyQueryUtxosAtAddressesWithDatums' = Just $ maestroUtxosAtAddressesWithDatums env
+  , gyQueryUtxosAtPaymentCredential'   = Just $ maestroUtxosAtPaymentCredential env
   }
 
 -------------------------------------------------------------------------------
@@ -321,8 +384,8 @@ maestroProtocolParams env = do
       , protocolParamMaxBlockHeaderSize  = _protocolParametersMaxBlockHeaderSize
       , protocolParamMaxBlockBodySize    = _protocolParametersMaxBlockBodySize
       , protocolParamMaxTxSize           = _protocolParametersMaxTxSize
-      , protocolParamTxFeeFixed          = _protocolParametersMinFeeConstant
-      , protocolParamTxFeePerByte        = _protocolParametersMinFeeCoefficient
+      , protocolParamTxFeeFixed          = Api.Lovelace $ toInteger _protocolParametersMinFeeConstant
+      , protocolParamTxFeePerByte        = Api.Lovelace $ toInteger _protocolParametersMinFeeCoefficient
       , protocolParamMinUTxOValue        = Nothing -- Deprecated in Alonzo.
       , protocolParamStakeAddressDeposit = Api.Lovelace $ toInteger _protocolParametersStakeKeyDeposit
       , protocolParamStakePoolDeposit    = Api.Lovelace $ toInteger _protocolParametersPoolDeposit
@@ -346,10 +409,10 @@ maestroProtocolParams env = do
       , protocolParamMaxCollateralInputs = Just _protocolParametersMaxCollateralInputs
       , protocolParamCostModels          = M.fromList
                                               [ ( Api.S.AnyPlutusScriptVersion Api.PlutusScriptV1
-                                                , coerce $ Maestro._costModelsPlutusV1 _protocolParametersCostModels
+                                                , Api.CostModel $ M.elems $ coerce $ Maestro._costModelsPlutusV1 _protocolParametersCostModels
                                                 )
                                               , ( Api.S.AnyPlutusScriptVersion Api.PlutusScriptV2
-                                                , coerce $ Maestro._costModelsPlutusV2 _protocolParametersCostModels
+                                                , Api.CostModel $ M.elems $ coerce $ Maestro._costModelsPlutusV2 _protocolParametersCostModels
                                                 )
                                               ]
       , protocolParamUTxOCostPerByte     = Just . Api.Lovelace $ toInteger _protocolParametersCoinsPerUtxoByte

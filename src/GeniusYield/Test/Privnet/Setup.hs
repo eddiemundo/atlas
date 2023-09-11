@@ -98,12 +98,12 @@ makeSetup' DbSyncOpts {..} privnetPath = do
         info = Api.LocalNodeConnectInfo
             { Api.localConsensusModeParams = Api.CardanoModeParams $ Api.EpochSlots 500
             , Api.localNodeNetworkId       = networkIdToApi GYPrivnet
-            , Api.localNodeSocketPath      = pathNodeSocket paths
+            , Api.localNodeSocketPath      = Api.File $ pathNodeSocket paths
             }
 
     -- ask current slot, so we know local node connection works
-    slot <- nodeGetCurrentSlot info
-    debug $ printf "currentSlot = %s\n" slot
+    slot <- nodeGetSlotOfCurrentBlock info
+    debug $ printf "slotOfCurrentBlock = %s\n" slot
 
     lci <- newLCIClient info []
 
@@ -113,6 +113,11 @@ makeSetup' DbSyncOpts {..} privnetPath = do
         localLookupDatum = case dbSync of
             Just dbSync' | dbSyncOptsLookupDatum -> dbSyncLookupDatum dbSync'
             _                                    -> lciLookupDatum lci
+
+    let localAwaitTxConfirmed :: GYAwaitTx
+        localAwaitTxConfirmed = case dbSync of
+            Just dbSync' | dbSyncOptsAwaitTx -> dbSyncAwaitTxConfirmed dbSync'
+            _                                -> lciAwaitTxConfirmed lci
 
     let localQueryUtxo :: GYQueryUTxO
         localQueryUtxo = case dbSync of
@@ -127,25 +132,26 @@ makeSetup' DbSyncOpts {..} privnetPath = do
     -- context used for tests
     let ctx0 :: Ctx
         ctx0 = Ctx
-            { ctxEra             = era
-            , ctxInfo            = info
-            , ctxLCI             = lci
-            , ctxDbSync          = dbSync
-            , ctxUserF           = User userFskey userFaddr
-            , ctxUser2           = uncurry User (V.index userSkeyAddr (Proxy @0))
-            , ctxUser3           = uncurry User (V.index userSkeyAddr (Proxy @1))
-            , ctxUser4           = uncurry User (V.index userSkeyAddr (Proxy @2))
-            , ctxUser5           = uncurry User (V.index userSkeyAddr (Proxy @3))
-            , ctxUser6           = uncurry User (V.index userSkeyAddr (Proxy @4))
-            , ctxUser7           = uncurry User (V.index userSkeyAddr (Proxy @5))
-            , ctxUser8           = uncurry User (V.index userSkeyAddr (Proxy @6))
-            , ctxUser9           = uncurry User (V.index userSkeyAddr (Proxy @7))
-            , ctxGold            = GYLovelace -- temporarily
-            , ctxIron            = GYLovelace -- temporarily
-            , ctxLog             = noLogging
-            , ctxLookupDatum     = localLookupDatum
-            , ctxQueryUtxos      = localQueryUtxo
-            , ctxGetParams       = localGetParams
+            { ctxEra              = era
+            , ctxInfo             = info
+            , ctxLCI              = lci
+            , ctxDbSync           = dbSync
+            , ctxUserF            = User userFskey userFaddr
+            , ctxUser2            = uncurry User (V.index userSkeyAddr (Proxy @0))
+            , ctxUser3            = uncurry User (V.index userSkeyAddr (Proxy @1))
+            , ctxUser4            = uncurry User (V.index userSkeyAddr (Proxy @2))
+            , ctxUser5            = uncurry User (V.index userSkeyAddr (Proxy @3))
+            , ctxUser6            = uncurry User (V.index userSkeyAddr (Proxy @4))
+            , ctxUser7            = uncurry User (V.index userSkeyAddr (Proxy @5))
+            , ctxUser8            = uncurry User (V.index userSkeyAddr (Proxy @6))
+            , ctxUser9            = uncurry User (V.index userSkeyAddr (Proxy @7))
+            , ctxGold             = GYLovelace -- temporarily
+            , ctxIron             = GYLovelace -- temporarily
+            , ctxLog              = noLogging
+            , ctxLookupDatum      = localLookupDatum
+            , ctxAwaitTxConfirmed = localAwaitTxConfirmed
+            , ctxQueryUtxos       = localQueryUtxo
+            , ctxGetParams        = localGetParams
             }
 
     userBalances <- V.imapM
@@ -192,7 +198,7 @@ generateUser UserPaths {..} =
     existing `catchIOException` const new
   where
     existing = do
-        skey <- Api.readFileTextEnvelope (Api.AsSigningKey Api.AsPaymentKey) pathUserSKey >>=
+        skey <- Api.readFileTextEnvelope (Api.AsSigningKey Api.AsPaymentKey) (Api.File pathUserSKey) >>=
           \case
           Right skey -> return $ paymentSigningKeyFromApi skey
           Left err   -> throwIO $ userError $ show err
@@ -225,7 +231,7 @@ runAddressKeyGen
     -> IO (Api.SigningKey Api.PaymentKey)
 runAddressKeyGen skeyPath = do
       skey <- Api.generateSigningKey Api.AsPaymentKey
-      res <- Api.writeFileTextEnvelope skeyPath (Just skeyDesc) skey
+      res <- Api.writeFileTextEnvelope (Api.File skeyPath) (Just skeyDesc) skey
       case res of
           Right () -> return skey
           Left err -> do

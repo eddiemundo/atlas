@@ -20,28 +20,28 @@ module GeniusYield.GYConfig
     , isDbSync
     ) where
 
-import           Control.Exception                      (SomeException, bracket,
-                                                         try)
-import qualified Data.Aeson                             as Aeson
+import           Control.Exception                   (SomeException, bracket,
+                                                      try)
+import qualified Data.Aeson                          as Aeson
 import           Data.Aeson.TH
 import           Data.Aeson.Types
-import qualified Data.ByteString.Lazy                   as LBS
-import           Data.Char                              (toLower)
-import qualified Data.Text                              as T
-import           Data.Time                              (NominalDiffTime)
-import qualified Database.PostgreSQL.Simple             as PQ
-import qualified Database.PostgreSQL.Simple.URL         as PQ
+import qualified Data.ByteString.Lazy                as LBS
+import           Data.Char                           (toLower)
+import qualified Data.Text                           as T
+import           Data.Time                           (NominalDiffTime)
+import qualified Database.PostgreSQL.Simple          as PQ
+import qualified Database.PostgreSQL.Simple.URL      as PQ
 
-import qualified Cardano.Api                            as Api
+import qualified Cardano.Api                         as Api
 
 import           GeniusYield.Imports
-import qualified GeniusYield.Providers.Blockfrost       as Blockfrost
-import qualified GeniusYield.Providers.CachedQueryUTxOs as CachedQuery
-import qualified GeniusYield.Providers.CardanoDbSync    as DbSync
-import qualified GeniusYield.Providers.Katip            as Katip
-import qualified GeniusYield.Providers.Maestro          as MaestroApi
-import qualified GeniusYield.Providers.Node             as Node
-import qualified GeniusYield.Providers.SubmitApi        as SubmitApi
+import qualified GeniusYield.Providers.Blockfrost    as Blockfrost
+-- import qualified GeniusYield.Providers.CachedQueryUTxOs as CachedQuery
+import qualified GeniusYield.Providers.CardanoDbSync as DbSync
+import qualified GeniusYield.Providers.Katip         as Katip
+import qualified GeniusYield.Providers.Maestro       as MaestroApi
+import qualified GeniusYield.Providers.Node          as Node
+import qualified GeniusYield.Providers.SubmitApi     as SubmitApi
 import           GeniusYield.Types
 
 -- | How many seconds to keep slots cached, before refetching the data.
@@ -54,6 +54,15 @@ newtype Confidential a = Confidential a
 
 instance Show (Confidential a) where
   showsPrec _ _ = showString "<Confidential>"
+
+newtype PQConnInf = PQConnInf PQ.ConnectInfo
+  deriving newtype (Show)
+
+instance FromJSON PQConnInf where
+  parseJSON = Aeson.withText "ConnectInfo URL" $ \t ->
+    case PQConnInf <$> PQ.parseDatabaseUrl (T.unpack t) of
+      Nothing -> fail "Invalid PostgreSQL URL"
+      Just ci -> pure ci
 
 {- |
 The supported providers. The options are:
@@ -77,6 +86,14 @@ data GYCoreProviderInfo
   | GYMaestro {cpiMaestroToken :: !(Confidential Text)}
   | GYBlockfrost {cpiBlockfrostKey :: !(Confidential Text)}
   deriving stock (Show)
+
+$( deriveFromJSON
+    defaultOptions
+      { fieldLabelModifier = \fldName -> case drop 3 fldName of x : xs -> toLower x : xs; [] -> []
+      , sumEncoding = UntaggedValue
+      }
+    ''GYCoreProviderInfo
+ )
 
 coreProviderIO :: FilePath -> IO GYCoreProviderInfo
 coreProviderIO filePath = do
@@ -121,12 +138,19 @@ In JSON format, this essentially corresponds to:
 = { coreProvider: GYCoreProviderInfo, networkId: NetworkId, logging: [GYLogScribeConfig], utxoCacheEnable: boolean }
 -}
 data GYCoreConfig = GYCoreConfig
-  { cfgCoreProvider    :: !GYCoreProviderInfo
-  , cfgNetworkId       :: !GYNetworkId
-  , cfgLogging         :: ![GYLogScribeConfig]
-  , cfgUtxoCacheEnable :: !Bool
+  { cfgCoreProvider :: !GYCoreProviderInfo
+  , cfgNetworkId    :: !GYNetworkId
+  , cfgLogging      :: ![GYLogScribeConfig]
+  -- , cfgUtxoCacheEnable :: !Bool
   }
   deriving stock (Show)
+
+$( deriveFromJSON
+    defaultOptions
+      { fieldLabelModifier = \fldName -> case drop 3 fldName of x : xs -> toLower x : xs; [] -> []
+      }
+    ''GYCoreConfig
+ )
 
 coreConfigIO :: FilePath -> IO GYCoreConfig
 coreConfigIO file = do
@@ -144,23 +168,23 @@ withCfgProviders
     { cfgCoreProvider
     , cfgNetworkId
     , cfgLogging
-    , cfgUtxoCacheEnable
     }
     ns
     f =
     do
-      (gyGetParameters, gySlotActions', gyQueryUTxO', gyLookupDatum, gySubmitTx) <- case cfgCoreProvider of
+      (gyGetParameters, gySlotActions', gyQueryUTxO', gyLookupDatum, gySubmitTx, gyAwaitTxConfirmed) <- case cfgCoreProvider of
         GYNodeChainIx path (Confidential key) -> do
           let info = nodeConnectInfo path cfgNetworkId
               era = networkIdToEra cfgNetworkId
           mEnv <- MaestroApi.networkIdToMaestroEnv key cfgNetworkId
-          nodeSlotActions <- makeSlotActions slotCachingTime $ Node.nodeGetCurrentSlot info
+          nodeSlotActions <- makeSlotActions slotCachingTime $ Node.nodeGetSlotOfCurrentBlock info
           pure
             ( Node.nodeGetParameters era info
             , nodeSlotActions
             , Node.nodeQueryUTxO era info
-            , MaestroApi.maestroLookupDatum  mEnv
+            , MaestroApi.maestroLookupDatum mEnv
             , Node.nodeSubmitTx info
+            , MaestroApi.maestroAwaitTxConfirmed mEnv
             )
         GYDbSync (PQConnInf ci) submitUrl -> do
           -- NOTE: This provider generally does not support anything other than private testnets.
@@ -173,49 +197,52 @@ withCfgProviders
             , DbSync.dbSyncQueryUtxo conn
             , DbSync.dbSyncLookupDatum conn
             , SubmitApi.submitApiSubmitTxDefault submitApiEnv
+            , DbSync.dbSyncAwaitTxConfirmed conn
             )
         GYMaestro (Confidential apiToken) -> do
           maestroApiEnv <- MaestroApi.networkIdToMaestroEnv apiToken cfgNetworkId
           maestroGetParams <- makeGetParameters
-            (MaestroApi.maestroGetCurrentSlot maestroApiEnv)
+            (MaestroApi.maestroGetSlotOfCurrentBlock maestroApiEnv)
             (MaestroApi.maestroProtocolParams maestroApiEnv)
             (MaestroApi.maestroSystemStart maestroApiEnv)
             (MaestroApi.maestroEraHistory maestroApiEnv)
             (MaestroApi.maestroStakePools maestroApiEnv)
-          maestroSlotActions <- makeSlotActions slotCachingTime $ MaestroApi.maestroGetCurrentSlot maestroApiEnv
+          maestroSlotActions <- makeSlotActions slotCachingTime $ MaestroApi.maestroGetSlotOfCurrentBlock maestroApiEnv
           pure
             ( maestroGetParams
             , maestroSlotActions
             , MaestroApi.maestroQueryUtxo maestroApiEnv
             , MaestroApi.maestroLookupDatum maestroApiEnv
             , MaestroApi.maestroSubmitTx maestroApiEnv
+            , MaestroApi.maestroAwaitTxConfirmed maestroApiEnv
             )
         GYBlockfrost (Confidential key) -> do
           let proj = Blockfrost.networkIdToProject cfgNetworkId key
           blockfrostGetParams <- makeGetParameters
-            (Blockfrost.blockfrostGetCurrentSlot proj)
+            (Blockfrost.blockfrostGetSlotOfCurrentBlock proj)
             (Blockfrost.blockfrostProtocolParams proj)
             (Blockfrost.blockfrostSystemStart proj)
             (Blockfrost.blockfrostEraHistory proj)
             (Blockfrost.blockfrostStakePools proj)
-          blockfrostSlotActions <- makeSlotActions slotCachingTime $ Blockfrost.blockfrostGetCurrentSlot proj
+          blockfrostSlotActions <- makeSlotActions slotCachingTime $ Blockfrost.blockfrostGetSlotOfCurrentBlock proj
           pure
             ( blockfrostGetParams
             , blockfrostSlotActions
             , Blockfrost.blockfrostQueryUtxo proj
             , Blockfrost.blockfrostLookupDatum proj
             , Blockfrost.blockfrostSubmitTx proj
+            , Blockfrost.blockfrostAwaitTxConfirmed proj
             )
 
       bracket (Katip.mkKatipLog ns cfgLogging) logCleanUp $ \gyLog' -> do
         (gyQueryUTxO, gySlotActions) <-
-            if cfgUtxoCacheEnable
+            {-if cfgUtxoCacheEnable
             then do
                 (gyQueryUTxO, purgeCache) <- CachedQuery.makeCachedQueryUTxO gyQueryUTxO' gyLog'
                 -- waiting for the next block will purge the utxo cache.
                 let gySlotActions = gySlotActions' { gyWaitForNextBlock' = purgeCache >> gyWaitForNextBlock' gySlotActions'}
                 pure (gyQueryUTxO, gySlotActions)
-            else pure (gyQueryUTxO', gySlotActions')
+            else-} pure (gyQueryUTxO', gySlotActions')
         e <- try $ f GYProviders {..}
         case e of
             Right a                     -> pure a
@@ -223,26 +250,3 @@ withCfgProviders
                 logRun gyLog' mempty GYError $ printf "ERROR: %s" $ show err
                 throwIO err
 
-newtype PQConnInf = PQConnInf PQ.ConnectInfo
-  deriving newtype (Show)
-
-instance FromJSON PQConnInf where
-  parseJSON = Aeson.withText "ConnectInfo URL" $ \t ->
-    case PQConnInf <$> PQ.parseDatabaseUrl (T.unpack t) of
-      Nothing -> fail "Invalid PostgreSQL URL"
-      Just ci -> pure ci
-
-$( deriveFromJSON
-    defaultOptions
-      { fieldLabelModifier = \fldName -> case drop 3 fldName of x : xs -> toLower x : xs; [] -> []
-      , sumEncoding = UntaggedValue
-      }
-    ''GYCoreProviderInfo
- )
-
-$( deriveFromJSON
-    defaultOptions
-      { fieldLabelModifier = \fldName -> case drop 3 fldName of x : xs -> toLower x : xs; [] -> []
-      }
-    ''GYCoreConfig
- )
