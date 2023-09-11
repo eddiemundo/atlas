@@ -62,6 +62,8 @@ module GeniusYield.Transaction (
 import           Control.Monad.Trans.Except            (runExceptT, throwE)
 import           Data.Foldable                         (for_)
 import qualified Data.Map                              as Map
+import qualified Data.ByteString.Base16                as Base16
+import qualified Data.ByteString.Short                 as SBS
 import           Data.Ratio                            ((%))
 
 import           Data.Either.Combinators               (maybeToRight)
@@ -403,6 +405,17 @@ finalizeGYBalancedTx
     txMetadata :: Api.TxMetadataInEra Api.BabbageEra
     txMetadata = maybe Api.TxMetadataNone coerce mbTxMetadata
 
+    -- Adding empty script so that CML will use Alonzo encoding of aux data
+    txAuxScripts :: Api.TxAuxScripts Api.BabbageEra
+    txAuxScripts =
+      Api.TxAuxScripts
+        Api.AuxScriptsInBabbageEra
+        [Api.ScriptInEra Api.PlutusScriptV1InBabbage
+          $ Api.PlutusScript Api.PlutusScriptV1
+          $ Api.S.PlutusScriptSerialised 
+          $ SBS.toShort
+          $ Base16.decodeLenient "4f010000322253330034a22930b2b9a1"]
+
     body :: Api.TxBodyContent Api.BuildTx Api.BabbageEra
     body = Api.TxBodyContent
         ins'
@@ -414,7 +427,7 @@ finalizeGYBalancedTx
         fee
         (lb', ub')
         txMetadata
-        Api.TxAuxScriptsNone
+        txAuxScripts
         extra
         (Api.BuildTxWith $ Just $ Api.S.unbundleProtocolParams pp)
         Api.TxWithdrawalsNone
