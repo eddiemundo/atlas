@@ -46,6 +46,7 @@ import qualified PlutusTx.Builtins                    as PlutusTx
 import qualified Cardano.Api.Shelley                  as Api
 import           GeniusYield.Imports
 import           GeniusYield.Types.Ledger
+import qualified Web.HttpApiData                      as Web
 
 -- | Datum
 --
@@ -98,6 +99,12 @@ newtype GYDatumHash = GYDatumHash (Api.Hash Api.ScriptData)
     deriving stock   (Show)
     deriving newtype (Eq, Ord, ToJSON, FromJSON)
 
+-- >>> Web.toUrlPiece (GYDatumHash "0103c27d58a7b32241bb7f03045fae8edc01dd2f2a70a349addc17f6536fde76")
+-- "0103c27d58a7b32241bb7f03045fae8edc01dd2f2a70a349addc17f6536fde76"
+--
+instance Web.ToHttpApiData GYDatumHash where
+    toUrlPiece = Api.serialiseToRawBytesHexText . datumHashToApi
+
 instance IsString GYDatumHash where
     fromString = unsafeDatumHashFromPlutus . fromString
 
@@ -132,8 +139,6 @@ unsafeDatumHashFromPlutus :: Plutus.DatumHash -> GYDatumHash
 unsafeDatumHashFromPlutus =
     either (error . ("unsafeDatumHashFromPlutus: " ++) . show) id . datumHashFromPlutus
 
--- TODO: remove me #27
---       (https://github.com/geniusyield/atlas/issues/27)
 datumHashToPlutus :: GYDatumHash -> Plutus.DatumHash
 datumHashToPlutus h = Plutus.DatumHash (PlutusTx.toBuiltin (Api.serialiseToRawBytes (datumHashToApi h)))
 

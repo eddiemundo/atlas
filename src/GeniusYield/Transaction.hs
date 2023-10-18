@@ -60,7 +60,9 @@ module GeniusYield.Transaction (
 ) where
 
 import           Control.Monad.Trans.Except            (runExceptT, throwE)
-import           Data.Foldable                         (for_)
+import           Data.Foldable                         (Foldable (foldMap'),
+                                                        for_)
+import           Data.List                             (delete)
 import qualified Data.Map                              as Map
 import qualified Data.ByteString.Base16                as Base16
 import qualified Data.ByteString.Short                 as SBS
@@ -100,15 +102,7 @@ data GYBuildTxEnv = GYBuildTxEnv
     }
 
 utxoFromTxInDetailed :: GYTxInDetailed v -> GYUTxO
-utxoFromTxInDetailed (GYTxInDetailed (GYTxIn ref witns) addr val ms useInline) = GYUTxO ref addr val (toOutDatum witns) ms
-  where
-    toOutDatum GYTxInWitnessKey = GYOutDatumNone
-    toOutDatum
-        (GYTxInWitnessScript
-            _
-            gyTxInDatumValue
-            _
-        ) = (if useInline then GYOutDatumInline else GYOutDatumHash . hashDatum) gyTxInDatumValue
+utxoFromTxInDetailed (GYTxInDetailed (GYTxIn ref _witns) addr val d ms) = GYUTxO ref addr val d ms
 
 data BuildTxException
     = BuildTxBalancingError !BalancingError
@@ -129,6 +123,7 @@ data BuildTxException
     | BuildTxNoSuitableCollateral
     -- ^ Couldn't find a UTxO to use as collateral.
     | BuildTxCborSimplificationError !CborSimplificationError
+    | BuildTxCollapseExtraOutError !Api.TxBodyError
   deriving stock    Show
   deriving anyclass (Exception, IsGYApiError)
 
@@ -226,6 +221,7 @@ buildUnsignedTxBody env cstrat insOld outsOld refIns mmint lb ub signers mbTxMet
                     , gybtxRefIns        = refIns
                     , gybtxMetadata      = mbTxMetadata
                     }
+                (length outsOld)
 
     retryIfRandomImprove GYRandomImproveMultiAsset n _ = buildTxLoop GYLargestFirstMultiAsset (if n == extraLovelaceStart then extraLovelaceStart else n `div` 2)
     retryIfRandomImprove _ _ err                       = pure $ Left err
@@ -296,7 +292,7 @@ balanceTxStep
 retColSup :: Api.S.TxTotalAndReturnCollateralSupportedInEra Api.S.BabbageEra
 retColSup = Api.TxTotalAndReturnCollateralInBabbageEra
 
-finalizeGYBalancedTx :: GYBuildTxEnv -> GYBalancedTx v -> Either BuildTxException GYTxBody
+finalizeGYBalancedTx :: GYBuildTxEnv -> GYBalancedTx v -> Int -> Either BuildTxException GYTxBody
 finalizeGYBalancedTx
     GYBuildTxEnv
         { gyBTxEnvSystemStart    = ss
@@ -347,7 +343,7 @@ finalizeGYBalancedTx
     outs' = txOutToApi <$> outs
 
     ins' :: [(Api.TxIn, Api.BuildTxWith Api.BuildTx (Api.Witness Api.WitCtxTxIn Api.BabbageEra))]
-    ins' = [ txInToApi (gyTxInDetInlineDat i) (gyTxInDet i) |  i <- ins ]
+    ins' = [ txInToApi (isInlineDatum $ gyTxInDetDatum i) (gyTxInDet i) |  i <- ins ]
 
     collaterals' :: Api.TxInsCollateral Api.BabbageEra
     collaterals' = case utxosRefs collaterals of
@@ -448,8 +444,9 @@ makeTransactionBodyAutoBalanceWrapper :: GYUTxOs
                                       -> Api.S.UTxO Api.S.BabbageEra
                                       -> Api.S.TxBodyContent Api.S.BuildTx Api.S.BabbageEra
                                       -> GYAddress
+                                      -> Int
                                       -> Either BuildTxException GYTxBody
-makeTransactionBodyAutoBalanceWrapper collaterals ss eh pp ps utxos body changeAddr = do
+makeTransactionBodyAutoBalanceWrapper collaterals ss eh pp ps utxos body changeAddr numSkeletonOuts = do
     Api.ExecutionUnits
         { executionSteps  = maxSteps
         , executionMemory = maxMemory
@@ -472,7 +469,7 @@ makeTransactionBodyAutoBalanceWrapper collaterals ss eh pp ps utxos body changeA
         Nothing
 
     -- We should call `makeTransactionBodyAutoBalance` again with updated values of collaterals so as to get slightly lower fee estimate.
-    Api.BalancedTxBody _ txBody _ _ <- if collaterals == mempty then return bodyBeforeCollUpdate else
+    Api.BalancedTxBody txBodyContent txBody extraOut _ <- if collaterals == mempty then return bodyBeforeCollUpdate else
 
       let
 
@@ -517,4 +514,46 @@ makeTransactionBodyAutoBalanceWrapper collaterals ss eh pp ps utxos body changeA
         {- Technically, this doesn't compare with the _final_ tx size, because of signers that will be
         added later. But signing witnesses are only a few bytes, so it's unlikely to be an issue -}
         Left (BuildTxSizeTooBig maxTxSize txSize)
-    first BuildTxCborSimplificationError $ simplifyGYTxBodyCbor $ txBodyFromApi txBody
+
+    collapsedBody <- first BuildTxCollapseExtraOutError $ collapseExtraOut extraOut txBodyContent txBody numSkeletonOuts
+
+    first BuildTxCborSimplificationError $ simplifyGYTxBodyCbor $ txBodyFromApi collapsedBody
+
+
+{- | Collapses the extra out generated in the last step of tx building into
+    another change output (If one exists)
+
+    The amount of outputs that should not be modified is needed. In other words,
+    the amount of outputs described in the GYSkeleton. It is assumed that these
+    outputs are at the start of the txOuts list.
+-}
+collapseExtraOut
+  :: Api.TxOut Api.S.CtxTx Api.S.BabbageEra
+  -- ^ The extra output generated by @makeTransactionBodyAutoBalance@.
+  -> Api.TxBodyContent Api.S.BuildTx Api.S.BabbageEra
+  -- ^ The body content generted by @makeTransactionBodyAutoBalance@.
+  -> Api.TxBody Api.S.BabbageEra
+  -- ^ The body generted by @makeTransactionBodyAutoBalance@.
+  -> Int
+  -- ^ The number of skeleton outputs we don't want to touch.
+  -> Either Api.S.TxBodyError (Api.TxBody Api.S.BabbageEra)
+  -- ^ The updated body with the collapsed outputs
+collapseExtraOut apiOut@(Api.TxOut _ outVal _ _) bodyContent@Api.TxBodyContent {txOuts} txBody numSkeletonOuts
+ | Api.txOutValueToLovelace outVal == 0 = pure txBody
+ | otherwise =
+    case delete apiOut changeOuts of
+        [] -> pure txBody
+        ((Api.TxOut sOutAddr sOutVal sOutDat sOutRefScript) : remOuts) ->
+          let
+
+            nOutVal = Api.TxOutValue Api.MultiAssetInBabbageEra $ foldMap' Api.txOutValueToValue [sOutVal, outVal]
+
+            -- nOut == new Out == The merging of both apiOut and sOut
+            nOut = Api.TxOut sOutAddr nOutVal sOutDat sOutRefScript
+            -- nOuts == new Outs == The new list of outputs
+            nOuts = skeletonOuts ++ remOuts ++ [nOut]
+
+          in
+            Api.S.createAndValidateTransactionBody $ bodyContent { Api.txOuts = nOuts }
+  where
+    (skeletonOuts, changeOuts) = splitAt numSkeletonOuts txOuts
