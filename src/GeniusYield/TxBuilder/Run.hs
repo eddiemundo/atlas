@@ -38,7 +38,7 @@ import           Control.Monad.Random
 import           Control.Monad.Reader
 import           Control.Monad.State
 import           Data.Foldable                             (foldMap')
-import           Data.List                                 ((\\), singleton)
+import           Data.List                                 (singleton, (\\))
 import           Data.List.NonEmpty                        (NonEmpty (..))
 import qualified Data.Map.Strict                           as Map
 import           Data.Semigroup                            (Sum (..))
@@ -59,7 +59,7 @@ import qualified PlutusTx.Builtins.Internal                as Plutus
 import qualified Cardano.Simple.PlutusLedgerApi.V1.Scripts as Fork
 import           Data.Sequence                             (ViewR (..), viewr)
 import           GeniusYield.Imports
-import           GeniusYield.Transaction                   (GYCoinSelectionStrategy (GYRandomImproveMultiAsset))
+import           GeniusYield.Transaction                   (GYCoinSelectionStrategy (GYRandomImproveMultiAsset), BuildTxException (BuildTxBalancingError))
 import           GeniusYield.Transaction.Common            (adjustTxOut,
                                                             minimumUTxO)
 import           GeniusYield.TxBuilder.Class
@@ -155,10 +155,14 @@ instance GYTxQueryMonad GYTxMonadRun where
             d <- Map.lookup (datumHashToPlutus h) mdh
             return $ datumFromPlutus d
 
-    utxosAtAddress addr = do
+    utxosAtAddress addr mAssetClass = do
         refs  <- liftRun $ txOutRefAt $ addressToPlutus addr
         utxos <- wither f refs
-        return $ utxosFromList utxos
+        let utxos' =
+              case mAssetClass of
+                Nothing -> utxos
+                Just ac -> filter (\GYUTxO {..} -> valueAssetClass utxoValue ac > 0) utxos
+        return $ utxosFromList utxos'
       where
         f :: Plutus.TxOutRef -> GYTxMonadRun (Maybe GYUTxO)
         f ref = do
@@ -472,7 +476,7 @@ skeletonToTxBody skeleton = do
         Left err  -> throwAppError err
         Right res -> case res of
             GYTxBuildSuccess (Identity body :| _) -> return body
-            GYTxBuildFailure v                    -> throwAppError $ InsufficientFundsErr v
+            GYTxBuildFailure be                   -> throwAppError $ BuildTxBalancingError be
             GYTxBuildPartialSuccess _ _           -> error "impossible case"
             GYTxBuildNoInputs                     -> error "impossible case"
 

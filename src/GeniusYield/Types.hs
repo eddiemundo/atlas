@@ -21,6 +21,7 @@ import           GeniusYield.Types.Era           as X
 import           GeniusYield.Types.Key           as X
 import           GeniusYield.Types.Ledger        as X
 import           GeniusYield.Types.Logging       as X
+import           GeniusYield.Types.Natural       as X
 import           GeniusYield.Types.NetworkId     as X
 import           GeniusYield.Types.PlutusVersion as X
 import           GeniusYield.Types.Providers     as X
@@ -30,6 +31,7 @@ import           GeniusYield.Types.Redeemer      as X
 import           GeniusYield.Types.Script        as X
 import           GeniusYield.Types.Slot          as X
 import           GeniusYield.Types.SlotConfig    as X
+import           GeniusYield.Types.StakeKeyHash  as X
 import           GeniusYield.Types.Time          as X
 import           GeniusYield.Types.Tx            as X
 import           GeniusYield.Types.TxBody        as X
