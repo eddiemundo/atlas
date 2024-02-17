@@ -14,6 +14,7 @@ module GeniusYield.Types.TxBody (
     txBodyToApi,
     -- * Transaction creation
     signGYTxBody,
+    signGYTxBody',
     signTx,
     unsignedTx,
     makeSignedTransaction,
@@ -33,6 +34,7 @@ module GeniusYield.Types.TxBody (
     txBodyTxInsReference,
     txBodyTxId,
     txBodyToApiTxBodyContent,
+    txBodyReqSignatories,
     txBodyMintValue,
     txBodyValidityRange,
     txBodyCollateral,
@@ -44,16 +46,18 @@ module GeniusYield.Types.TxBody (
 ) where
 
 
-import qualified Cardano.Api                 as Api
-import qualified Cardano.Api.Shelley         as Api.S
-import qualified Data.ByteString             as BS
-import qualified Data.ByteString.Base16      as BS16
-import qualified Data.ByteString.Char8       as BS8
-import qualified Data.Set                    as Set
+import qualified Cardano.Api                  as Api
+import qualified Cardano.Api.Shelley          as Api.S
+import qualified Data.ByteString              as BS
+import qualified Data.ByteString.Base16       as BS16
+import qualified Data.ByteString.Char8        as BS8
+import qualified Data.Set                     as Set
 
 import           GeniusYield.Imports
-import           GeniusYield.Types.Key.Class (ToShelleyWitnessSigningKey,
-                                              toShelleyWitnessSigningKey)
+import           GeniusYield.Types.Key        (GYSomeSigningKey (GYSomeSigningKey))
+import           GeniusYield.Types.Key.Class  (ToShelleyWitnessSigningKey,
+                                               toShelleyWitnessSigningKey)
+import           GeniusYield.Types.PubKeyHash (GYPubKeyHash, pubKeyHashFromApi)
 import           GeniusYield.Types.Slot
 import           GeniusYield.Types.Tx
 import           GeniusYield.Types.TxOutRef
@@ -78,6 +82,10 @@ signGYTxBody = signTx
 {-# DEPRECATED signTx "Use signGYTxBody." #-}
 signTx :: ToShelleyWitnessSigningKey a =>  GYTxBody -> [a] -> GYTx
 signTx (GYTxBody txBody) skeys = txFromApi $ Api.signShelleyTransaction txBody $ map toShelleyWitnessSigningKey skeys
+
+-- | Sign a transaction body with (potentially) multiple keys of potentially different nature.
+signGYTxBody' :: GYTxBody -> [GYSomeSigningKey] -> GYTx
+signGYTxBody' (txBodyToApi -> txBody) skeys = txFromApi $ Api.signShelleyTransaction txBody $ map (\(GYSomeSigningKey a) -> toShelleyWitnessSigningKey a) skeys
 
 -- | Make a signed transaction given the transaction body & list of key witnesses, represented in `GYTxWitness`.
 makeSignedTransaction :: GYTxWitness -> GYTxBody -> GYTx
@@ -179,6 +187,12 @@ getTxBody = txBodyFromApi . Api.getTxBody . txToApi
 
 txBodyToApiTxBodyContent :: GYTxBody -> Api.TxBodyContent Api.ViewTx Api.BabbageEra
 txBodyToApiTxBodyContent body = let Api.TxBody bc = txBodyToApi body in bc
+
+-- | Returns the required signatories of the given 'GYTxBody'.
+txBodyReqSignatories :: GYTxBody -> Set.Set GYPubKeyHash
+txBodyReqSignatories body = case Api.txExtraKeyWits $ txBodyToApiTxBodyContent body of
+  Api.TxExtraKeyWitnessesNone -> mempty
+  Api.TxExtraKeyWitnesses _ reqPKHs -> Set.fromList $ pubKeyHashFromApi <$> reqPKHs
 
 -- | Returns the mint 'GYValue' of the given 'GYTxBody'.
 txBodyMintValue :: GYTxBody -> GYValue

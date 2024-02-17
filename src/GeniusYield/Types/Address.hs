@@ -17,6 +17,7 @@ module GeniusYield.Types.Address (
     addressToPaymentCredential,
     addressToStakeCredential,
     addressFromPubKeyHash,
+    addressFromPaymentKeyHash,
     addressFromValidator,
     addressFromCredential,
     addressFromValidatorHash,
@@ -37,8 +38,14 @@ module GeniusYield.Types.Address (
     unsafeStakeAddressFromText,
     stakeAddressToText,
     stakeAddressCredential,
+    stakeAddressToCredential,
+    stakeAddressFromCredential,
     GYStakeKeyHashString,
     stakeKeyFromAddress,
+    -- * newtype wrapper
+    GYStakeAddressBech32,
+    stakeAddressToBech32,
+    stakeAddressFromBech32
 ) where
 
 import qualified Cardano.Api                          as Api
@@ -85,6 +92,8 @@ import           GeniusYield.Types.Credential         (GYPaymentCredential,
                                                        stakeCredentialToHexText)
 import           GeniusYield.Types.Ledger
 import           GeniusYield.Types.NetworkId
+import           GeniusYield.Types.PaymentKeyHash     (GYPaymentKeyHash,
+                                                       paymentKeyHashToApi)
 import           GeniusYield.Types.PubKeyHash
 import           GeniusYield.Types.Script
 
@@ -95,6 +104,7 @@ import           GeniusYield.Types.Script
 -- >>> import qualified Data.Aeson                 as Aeson
 -- >>> import qualified Data.ByteString.Lazy.Char8 as LBS8
 -- >>> import qualified Data.Csv                   as Csv
+-- >>> import GeniusYield.Types.NetworkId
 -- >>> import qualified Text.Printf                as Printf
 -- >>> import qualified Web.HttpApiData            as Web
 --
@@ -236,7 +246,7 @@ addressFromPlutus nid addr =
 -- | If an address is a shelley address, then we'll return payment credential wrapped in `Just`, `Nothing` otherwise.
 --
 -- >>> addressToPaymentCredential addr
--- Just (GYPaymentCredentialByKey (GYPubKeyHash "e1cbb80db89e292269aeb93ec15eb963dda5176b66949fe1c2a6a38d"))
+-- Just (GYPaymentCredentialByKey (GYPaymentKeyHash "e1cbb80db89e292269aeb93ec15eb963dda5176b66949fe1c2a6a38d"))
 -- >>> addressToPaymentCredential addrScript
 -- Just (GYPaymentCredentialByScript (GYValidatorHash "178155803bc461c5b0b371c779cb481ec7420df0c619cd9860e570d2"))
 -- >>> addressToPaymentCredential addrByron1
@@ -278,10 +288,21 @@ getShelleyAddressStakeCredential (Api.S.ShelleyAddress _network _payment stake) 
 --
 -- /note:/ no stake credential.
 --
+{-# DEPRECATED addressFromPubKeyHash "Use addressFromPaymentKeyHash." #-}
 addressFromPubKeyHash :: GYNetworkId -> GYPubKeyHash -> GYAddress
 addressFromPubKeyHash nid pkh = addressFromApi $ Api.AddressShelley $ Api.S.makeShelleyAddress
     (networkIdToApi nid)
     (Api.S.PaymentCredentialByKey (pubKeyHashToApi pkh))
+    Api.S.NoStakeAddress
+
+-- | Create address from 'GYPaymentKeyHash'.
+--
+-- /note:/ no stake credential.
+--
+addressFromPaymentKeyHash :: GYNetworkId -> GYPaymentKeyHash -> GYAddress
+addressFromPaymentKeyHash nid pkh = addressFromApi $ Api.AddressShelley $ Api.S.makeShelleyAddress
+    (networkIdToApi nid)
+    (Api.S.PaymentCredentialByKey (paymentKeyHashToApi pkh))
     Api.S.NoStakeAddress
 
 -- | Create address from 'GYValidatorHash'.
@@ -463,7 +484,7 @@ instance Swagger.ToSchema GYAddress where
 -- newtype
 -------------------------------------------------------------------------------
 
--- | 'GYAddress' which uses "serialized" format
+-- | 'GYAddressBech32' which uses "bech32" format
 --
 -- >>> Web.toUrlPiece $ addressToBech32 addr
 -- "addr_test1qrsuhwqdhz0zjgnf46unas27h93amfghddnff8lpc2n28rgmjv8f77ka0zshfgssqr5cnl64zdnde5f8q2xt923e7ctqu49mg5"
@@ -577,9 +598,22 @@ unsafeStakeAddressFromText t = fromMaybe
 stakeAddressToText :: GYStakeAddress -> Text.Text
 stakeAddressToText = Api.serialiseAddress . stakeAddressToApi
 
+
+{-# DEPRECATED stakeAddressCredential "Use stakeAddressToCredential." #-}
 -- | Get a stake credential from a stake address. This drops the network information.
 stakeAddressCredential :: GYStakeAddress -> GYStakeCredential
 stakeAddressCredential = stakeCredentialFromApi . Api.stakeAddressCredential . stakeAddressToApi
+
+-- | Get a stake credential from a stake address. This drops the network information.
+stakeAddressToCredential :: GYStakeAddress -> GYStakeCredential
+stakeAddressToCredential = stakeAddressCredential
+
+-- | Get a stake address from a stake credential. This also requires network information.
+--
+-- >>> stakeAddr == stakeAddressFromCredential GYTestnetPreprod (stakeAddressToCredential stakeAddr)
+-- True
+stakeAddressFromCredential :: GYNetworkId -> GYStakeCredential -> GYStakeAddress
+stakeAddressFromCredential (networkIdToApi -> netId') (stakeCredentialToApi -> stakeCred') = Api.makeStakeAddress netId' stakeCred' & stakeAddressFromApi
 
 type GYStakeKeyHashString = String
 
@@ -706,3 +740,88 @@ instance Swagger.ToSchema GYStakeAddress where
   declareNamedSchema _ = pure $ Swagger.named "GYStakeAddress" $ Swagger.paramSchemaToSchema (Proxy @GYStakeAddress)
                        & Swagger.description    ?~ "A stake address, serialised as CBOR."
                        & Swagger.example        ?~ toJSON ("e07a77d120b9e86addc7388dbbb1bd2350490b7d140ab234038632334d" :: Text)
+
+-------------------------------------------------------------------------------
+-- Text.Printf
+-------------------------------------------------------------------------------
+
+-- | This instance is using for logging
+--
+-- >>> Printf.printf "stake addr = %s" stakeAddr
+-- stake addr = stake_test1upa805fqh85x4hw88zxmhvdaydgyjzmazs9tydqrscerxnghfq4t3
+instance Printf.PrintfArg GYStakeAddress where
+    formatArg stakeAddr = Printf.formatArg (stakeAddressToText stakeAddr)
+
+-- | 'GYStakeAddressBech32' which uses "bech32" format
+--
+-- >>> Web.toUrlPiece $ stakeAddressToBech32 stakeAddr
+-- "stake_test1upa805fqh85x4hw88zxmhvdaydgyjzmazs9tydqrscerxnghfq4t3"
+--
+newtype GYStakeAddressBech32 = GYStakeAddressBech32 GYStakeAddress
+  deriving newtype (Show, Eq, Ord, Printf.PrintfArg)
+
+stakeAddressToBech32 :: GYStakeAddress -> GYStakeAddressBech32
+stakeAddressToBech32 = coerce
+
+stakeAddressFromBech32 :: GYStakeAddressBech32 -> GYStakeAddress
+stakeAddressFromBech32 = coerce
+
+instance Web.ToHttpApiData GYStakeAddressBech32 where
+    toUrlPiece = coerce stakeAddressToText
+
+instance IsString GYStakeAddressBech32 where
+    fromString = fromRight (error "invalid stake address") . Web.parseUrlPiece . Text.pack
+
+-- |
+--
+-- >>> Web.parseUrlPiece @GYStakeAddressBech32 "stake_test1upa805fqh85x4hw88zxmhvdaydgyjzmazs9tydqrscerxnghfq4t3"
+-- Right (unsafeStakeAddressFromText "stake_test1upa805fqh85x4hw88zxmhvdaydgyjzmazs9tydqrscerxnghfq4t3")
+--
+instance Web.FromHttpApiData GYStakeAddressBech32 where
+    parseUrlPiece t = case stakeAddressFromTextMaybe t of
+        Just stakeAddr -> Right $ coerce stakeAddr
+        Nothing        -> Left $ "Not a stake address: " <> t
+
+-- |
+--
+-- >>> LBS8.putStrLn $ Aeson.encode $ stakeAddressToBech32 stakeAddr
+-- "stake_test1upa805fqh85x4hw88zxmhvdaydgyjzmazs9tydqrscerxnghfq4t3"
+--
+instance ToJSON GYStakeAddressBech32 where
+    toJSON (GYStakeAddressBech32 stakeAddr) = Aeson.toJSON $ stakeAddressToText stakeAddr
+
+-- |
+--
+-- >>> Aeson.decode @GYStakeAddressBech32 "\"stake_test1upa805fqh85x4hw88zxmhvdaydgyjzmazs9tydqrscerxnghfq4t3\""
+-- Just (unsafeStakeAddressFromText "stake_test1upa805fqh85x4hw88zxmhvdaydgyjzmazs9tydqrscerxnghfq4t3")
+--
+instance FromJSON GYStakeAddressBech32 where
+    parseJSON = Aeson.withText "GYStakeAddressBech32" $ \t ->
+        case stakeAddressFromTextMaybe t of
+            Just stakeAddr -> return $ GYStakeAddressBech32 stakeAddr
+            Nothing        -> fail "cannot deserialise stake address"
+
+instance PQ.ToField GYStakeAddressBech32 where
+    toField (GYStakeAddressBech32 stakeAddr) = PQ.toField $ stakeAddressToText stakeAddr
+
+instance PQ.FromField GYStakeAddressBech32 where
+    fromField f bs = do
+        t <- PQ.fromField f bs
+        case stakeAddressFromTextMaybe t of
+            Just stakeAddr -> return $ GYStakeAddressBech32 stakeAddr
+            Nothing   -> PQ.returnError PQ.ConversionFailed f "stake address does not unserialise"
+
+
+-------------------------------------------------------------------------------
+-- swagger schema
+-------------------------------------------------------------------------------
+
+instance Swagger.ToSchema GYStakeAddressBech32 where
+  declareNamedSchema _ = pure $ Swagger.named "GYStakeAddressBech32" $ Swagger.paramSchemaToSchema (Proxy @GYStakeAddressBech32)
+                       & Swagger.description  ?~ "A stake address, serialised as Bech32."
+                       & Swagger.example      ?~ toJSON ("stake_test1upa805fqh85x4hw88zxmhvdaydgyjzmazs9tydqrscerxnghfq4t3" :: Text)
+
+instance Swagger.ToParamSchema GYStakeAddressBech32 where
+  toParamSchema _ = mempty
+                  & Swagger.type_  ?~ Swagger.SwaggerString
+                  & Swagger.format ?~ "bech32"
