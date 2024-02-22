@@ -58,6 +58,7 @@ module GeniusYield.TxBuilder.Class
     , mustHaveOutput
     , mustHaveOptionalOutput
     , mustMint
+    , mustWithdraw
     , mustBeSignedBy
     , isInvalidBefore
     , isInvalidAfter
@@ -325,6 +326,7 @@ data GYTxSkeleton (v :: PlutusVersion) = GYTxSkeleton
     , gytxRefIns        :: !(GYTxSkeletonRefIns v)
     , gytxMint          :: !(Map (GYMintScript v) (Map GYTokenName Integer, GYRedeemer))
     , gytxSigs          :: !(Set GYPubKeyHash)
+    , gytxWithdrawals   :: !(Map GYStakeAddress (GYWithdrawWitness v, GYRedeemer, Integer))
     , gytxInvalidBefore :: !(Maybe GYSlot)
     , gytxInvalidAfter  :: !(Maybe GYSlot)
     } deriving Show
@@ -355,6 +357,7 @@ emptyGYTxSkeleton = GYTxSkeleton
     , gytxOuts          = []
     , gytxRefIns        = GYTxSkeletonNoRefIns
     , gytxMint          = Map.empty
+    , gytxWithdrawals   = Map.empty
     , gytxSigs          = Set.empty
     , gytxInvalidBefore = Nothing
     , gytxInvalidAfter  = Nothing
@@ -366,6 +369,7 @@ instance Semigroup (GYTxSkeleton v) where
         , gytxOuts          = gytxOuts x ++ gytxOuts y
         , gytxRefIns        = gytxRefIns x <> gytxRefIns y
         , gytxMint          = combineMint (gytxMint x) (gytxMint y)
+        , gytxWithdrawals   = combineWithdrawals (gytxWithdrawals x) (gytxWithdrawals y)
         , gytxSigs          = Set.union (gytxSigs x) (gytxSigs y)
         , gytxInvalidBefore = combineInvalidBefore (gytxInvalidBefore x) (gytxInvalidBefore y)
         , gytxInvalidAfter  = combineInvalidAfter (gytxInvalidAfter x) (gytxInvalidAfter y)
@@ -375,6 +379,10 @@ instance Semigroup (GYTxSkeleton v) where
         combineIns u v = nubBy ((==) `on` gyTxInTxOutRef) (u ++ v)
         -- we cannot combine redeemers, so we just pick first.
         combineMint = Map.unionWith (\(amt, r) (amt', _r) -> (Map.unionWith (+) amt amt', r))
+
+        combineWithdrawals = Map.unionWith (\(s1, _r1, i1) (s2, r2, i2) ->
+          if s1 == s2 then (s2, r2, i1 + i2) else (s2, r2, i2)
+          )
 
         combineInvalidBefore :: Maybe GYSlot -> Maybe GYSlot -> Maybe GYSlot
         combineInvalidBefore m        Nothing  = m
@@ -615,6 +623,10 @@ mustHaveOptionalOutput = maybe mempty $ \o -> emptyGYTxSkeleton {gytxOuts = [o]}
 mustMint :: GYMintScript v -> GYRedeemer -> GYTokenName -> Integer -> GYTxSkeleton v
 mustMint _ _ _ 0  = mempty
 mustMint p r tn n = emptyGYTxSkeleton {gytxMint = Map.singleton p (Map.singleton tn n, r)}
+
+mustWithdraw :: GYWithdrawWitness v -> GYStakeAddress -> GYRedeemer -> Integer -> GYTxSkeleton v
+mustWithdraw script credential redeemer amount =
+  emptyGYTxSkeleton { gytxWithdrawals = Map.singleton credential (script, redeemer, amount) }
 
 mustBeSignedBy :: CanSignTx a => a -> GYTxSkeleton v
 mustBeSignedBy pkh = emptyGYTxSkeleton {gytxSigs = Set.singleton $ toPubKeyHash pkh}

@@ -58,6 +58,9 @@ module GeniusYield.Types.Script (
     gyMintScriptToSerialisedScript,
     gyMintingScriptWitnessToApiPlutusSW,
 
+    -- * Witness for Withdraw
+    GYWithdrawWitness (..),
+
     -- ** File operations
     writeMintingPolicy,
     readMintingPolicy,
@@ -364,6 +367,19 @@ gyMintingScriptWitnessToApiPlutusSW (GYMintScript p) = mintingPolicyToApiPlutusS
 gyMintingScriptWitnessToApiPlutusSW (GYMintReference r s) =
     referenceScriptToApiPlutusScriptWitness r s
     Api.NoScriptDatumForMint
+
+data GYWithdrawWitness (u :: PlutusVersion) where
+  GYWithdrawWitnessScript :: v `VersionIsGreaterOrEqual` u => GYValidator v -> GYWithdrawWitness u
+  GYWithdrawWitnessReference :: !GYTxOutRef -> !(GYScript 'PlutusV2) -> GYWithdrawWitness 'PlutusV2
+  GYWithdrawWitnessKey :: GYWithdrawWitness 'PlutusV2
+
+deriving instance Show (GYWithdrawWitness v)
+
+instance Eq (GYWithdrawWitness v) where
+  GYWithdrawWitnessReference r s == GYWithdrawWitnessReference r' s' = r == r' && s == s'
+  GYWithdrawWitnessScript p == GYWithdrawWitnessScript p'            = defaultEq p p'
+  GYWithdrawWitnessKey == GYWithdrawWitnessKey                       = True
+  _ == _                                                             = False
 
 -- | Writes a minting policy to a file.
 --

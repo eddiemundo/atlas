@@ -34,6 +34,7 @@ data GYBalancedTx v = GYBalancedTx
     , gybtxCollaterals   :: !GYUTxOs
     , gybtxOuts          :: ![GYTxOut v]
     , gybtxMint          :: !(Maybe (GYValue, [(GYMintScript v, GYRedeemer)]))
+    , gybtxWithdrawals   :: !(Map GYStakeAddress (GYWithdrawWitness v, GYRedeemer, Integer))
     , gybtxInvalidBefore :: !(Maybe GYSlot)
     , gybtxInvalidAfter  :: !(Maybe GYSlot)
     , gybtxSigners       :: !(Set GYPubKeyHash)
