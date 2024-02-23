@@ -155,6 +155,7 @@ buildTxCore ss eh pp ps cstrat ownUtxoUpdateF addrs change reservedCollateral ac
                     (utxosFromList refInsUtxos)
                     gytxMint'
                     gytxWithdrawals
+                    gytxRegisteredStakeCredentials
                     gytxInvalidBefore
                     gytxInvalidAfter
                     gytxSigs

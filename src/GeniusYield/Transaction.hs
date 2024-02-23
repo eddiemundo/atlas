@@ -156,12 +156,13 @@ buildUnsignedTxBody :: forall m v.
         -> GYUTxOs  -- ^ reference inputs
         -> Maybe (GYValue, [(GYMintScript v, GYRedeemer)])  -- ^ minted values
         -> Map GYStakeAddress (GYWithdrawWitness v, GYRedeemer, Integer)  -- ^ withdraw
+        -> Map GYStakeCredential (GYPublishWitness v, GYRedeemer) -- ^ registered stake credentials
         -> Maybe GYSlot
         -> Maybe GYSlot
         -> Set GYPubKeyHash
         -> Maybe GYTxMetadata
         -> m (Either BuildTxException GYTxBody)
-buildUnsignedTxBody env cstrat insOld outsOld refIns mmint withdraws lb ub signers mbTxMetadata = buildTxLoop cstrat extraLovelaceStart
+buildUnsignedTxBody env cstrat insOld outsOld refIns mmint withdraws registeredStakeCredentials lb ub signers mbTxMetadata = buildTxLoop cstrat extraLovelaceStart
   where
 
     step :: GYCoinSelectionStrategy -> Natural -> m (Either BuildTxException ([GYTxInDetailed v], GYUTxOs, [GYTxOut v]))
@@ -216,6 +217,7 @@ buildUnsignedTxBody env cstrat insOld outsOld refIns mmint withdraws lb ub signe
                     , gybtxOuts          = outs
                     , gybtxMint          = mmint
                     , gybtxWithdrawals   = withdraws
+                    , gybtxRegisteredStakeCredentials = registeredStakeCredentials
                     , gybtxInvalidBefore = lb
                     , gybtxInvalidAfter  = ub
                     , gybtxSigners       = signers
@@ -308,6 +310,7 @@ finalizeGYBalancedTx
         , gybtxOuts          = outs
         , gybtxMint          = mmint
         , gybtxWithdrawals   = withdraws
+        , gybtxRegisteredStakeCredentials = registeredStakeCredentials
         , gybtxInvalidBefore = lb
         , gybtxInvalidAfter  = ub
         , gybtxSigners       = signers
@@ -400,7 +403,7 @@ finalizeGYBalancedTx
                           let apiPlutusScript =
                                 case withdrawScriptWitness of
                                   GYWithdrawWitnessReference txOutRef script ->
-                                    Api.S.PReferenceScript (txOutRefToApi txOutRef) Nothing--(Just $ scriptApiHash script)
+                                    Api.S.PReferenceScript (txOutRefToApi txOutRef) (Just $ scriptApiHash script)
                                   GYWithdrawWitnessScript validator ->
                                     Api.S.PScript $ Api.S.PlutusScriptSerialised $ validatorToSerialisedScript validator
                           Api.ScriptWitness
@@ -415,6 +418,39 @@ finalizeGYBalancedTx
                               )
                   (stakeAddressToApi stakeAddress , coerce amount , Api.BuildTxWith witness)
                 )
+    txCertificates :: Api.TxCertificates Api.BuildTx Api.BabbageEra
+    txCertificates = do
+      let (certificates, witnessMap) =
+            registeredStakeCredentials
+              & Map.toList
+              & fmap (\(stakeCredential, (publishWitness, redeemer)) -> do
+                  let certificate = Api.StakeAddressRegistrationCertificate (stakeCredentialToApi stakeCredential)
+                  let witness = case publishWitness of
+                        GYPublishWitnessKey -> Api.KeyWitness Api.KeyWitnessForStakeAddr
+                        withdrawScriptWitness -> do
+                          let apiPlutusScript =
+                                case withdrawScriptWitness of
+                                  GYPublishWitnessReference txOutRef script ->
+                                    Api.S.PReferenceScript (txOutRefToApi txOutRef) (Just $ scriptApiHash script)
+                                  GYPublishWitnessScript validator ->
+                                    Api.S.PScript $ Api.S.PlutusScriptSerialised $ validatorToSerialisedScript validator
+                          Api.ScriptWitness
+                            Api.ScriptWitnessForStakeAddr
+                            (Api.PlutusScriptWitness
+                              Api.PlutusScriptV2InBabbage
+                              Api.PlutusScriptV2
+                              apiPlutusScript
+                              Api.NoScriptDatumForStake
+                              (redeemerToApi redeemer)
+                              (Api.ExecutionUnits 0 0)
+                              )
+                  (certificate, Map.singleton (stakeCredentialToApi stakeCredential) witness)
+                )
+              & unzip
+              & fmap Map.unions
+      Api.TxCertificates Api.CertificatesInBabbageEra
+        certificates
+        (Api.BuildTxWith witnessMap)
 
     -- Putting `TxTotalCollateralNone` & `TxReturnCollateralNone` would have them appropriately calculated by `makeTransactionBodyAutoBalance` but then return collateral it generates is only for ada. To support multi-asset collateral input we therefore calculate correct values ourselves and put appropriate entries here to have `makeTransactionBodyAutoBalance` calculate appropriate overestimated fees.
     (dummyTotCol :: Api.TxTotalCollateral Api.BabbageEra, dummyRetCol :: Api.TxReturnCollateral Api.CtxTx Api.BabbageEra) =
@@ -460,7 +496,7 @@ finalizeGYBalancedTx
         extra
         (Api.BuildTxWith $ Just $ Api.S.unbundleProtocolParams pp)
         withdrawals
-        Api.TxCertificatesNone
+        txCertificates
         Api.TxUpdateProposalNone
         mint
         Api.TxScriptValidityNone

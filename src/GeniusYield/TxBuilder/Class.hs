@@ -59,6 +59,7 @@ module GeniusYield.TxBuilder.Class
     , mustHaveOptionalOutput
     , mustMint
     , mustWithdraw
+    , mustRegisterStakeCredential
     , mustBeSignedBy
     , isInvalidBefore
     , isInvalidAfter
@@ -327,6 +328,7 @@ data GYTxSkeleton (v :: PlutusVersion) = GYTxSkeleton
     , gytxMint          :: !(Map (GYMintScript v) (Map GYTokenName Integer, GYRedeemer))
     , gytxSigs          :: !(Set GYPubKeyHash)
     , gytxWithdrawals   :: !(Map GYStakeAddress (GYWithdrawWitness v, GYRedeemer, Integer))
+    , gytxRegisteredStakeCredentials :: !(Map GYStakeCredential (GYPublishWitness v, GYRedeemer))
     , gytxInvalidBefore :: !(Maybe GYSlot)
     , gytxInvalidAfter  :: !(Maybe GYSlot)
     } deriving Show
@@ -359,6 +361,7 @@ emptyGYTxSkeleton = GYTxSkeleton
     , gytxMint          = Map.empty
     , gytxWithdrawals   = Map.empty
     , gytxSigs          = Set.empty
+    , gytxRegisteredStakeCredentials = Map.empty
     , gytxInvalidBefore = Nothing
     , gytxInvalidAfter  = Nothing
     }
@@ -370,6 +373,8 @@ instance Semigroup (GYTxSkeleton v) where
         , gytxRefIns        = gytxRefIns x <> gytxRefIns y
         , gytxMint          = combineMint (gytxMint x) (gytxMint y)
         , gytxWithdrawals   = combineWithdrawals (gytxWithdrawals x) (gytxWithdrawals y)
+        , gytxRegisteredStakeCredentials =
+            combineRegisteredStakeCredentials (gytxRegisteredStakeCredentials x) (gytxRegisteredStakeCredentials y)
         , gytxSigs          = Set.union (gytxSigs x) (gytxSigs y)
         , gytxInvalidBefore = combineInvalidBefore (gytxInvalidBefore x) (gytxInvalidBefore y)
         , gytxInvalidAfter  = combineInvalidAfter (gytxInvalidAfter x) (gytxInvalidAfter y)
@@ -383,6 +388,8 @@ instance Semigroup (GYTxSkeleton v) where
         combineWithdrawals = Map.unionWith (\(s1, _r1, i1) (s2, r2, i2) ->
           if s1 == s2 then (s2, r2, i1 + i2) else (s2, r2, i2)
           )
+
+        combineRegisteredStakeCredentials = Map.unionWith (\_s1 s2 -> s2)
 
         combineInvalidBefore :: Maybe GYSlot -> Maybe GYSlot -> Maybe GYSlot
         combineInvalidBefore m        Nothing  = m
@@ -627,6 +634,10 @@ mustMint p r tn n = emptyGYTxSkeleton {gytxMint = Map.singleton p (Map.singleton
 mustWithdraw :: GYWithdrawWitness v -> GYStakeAddress -> GYRedeemer -> Integer -> GYTxSkeleton v
 mustWithdraw script credential redeemer amount =
   emptyGYTxSkeleton { gytxWithdrawals = Map.singleton credential (script, redeemer, amount) }
+
+mustRegisterStakeCredential :: GYPublishWitness v -> GYRedeemer -> GYStakeCredential -> GYTxSkeleton v
+mustRegisterStakeCredential witness redeemer stakeCredential =
+  emptyGYTxSkeleton{ gytxRegisteredStakeCredentials = Map.singleton stakeCredential (witness, redeemer) }
 
 mustBeSignedBy :: CanSignTx a => a -> GYTxSkeleton v
 mustBeSignedBy pkh = emptyGYTxSkeleton {gytxSigs = Set.singleton $ toPubKeyHash pkh}

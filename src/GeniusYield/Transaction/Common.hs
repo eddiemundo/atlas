@@ -35,6 +35,7 @@ data GYBalancedTx v = GYBalancedTx
     , gybtxOuts          :: ![GYTxOut v]
     , gybtxMint          :: !(Maybe (GYValue, [(GYMintScript v, GYRedeemer)]))
     , gybtxWithdrawals   :: !(Map GYStakeAddress (GYWithdrawWitness v, GYRedeemer, Integer))
+    , gybtxRegisteredStakeCredentials :: !(Map GYStakeCredential (GYPublishWitness v, GYRedeemer))
     , gybtxInvalidBefore :: !(Maybe GYSlot)
     , gybtxInvalidAfter  :: !(Maybe GYSlot)
     , gybtxSigners       :: !(Set GYPubKeyHash)
