@@ -400,7 +400,7 @@ finalizeGYBalancedTx
                           let apiPlutusScript =
                                 case withdrawScriptWitness of
                                   GYWithdrawWitnessReference txOutRef script ->
-                                    Api.S.PReferenceScript (txOutRefToApi txOutRef) (Just $ scriptApiHash script)
+                                    Api.S.PReferenceScript (txOutRefToApi txOutRef) Nothing--(Just $ scriptApiHash script)
                                   GYWithdrawWitnessScript validator ->
                                     Api.S.PScript $ Api.S.PlutusScriptSerialised $ validatorToSerialisedScript validator
                           Api.ScriptWitness
