@@ -87,6 +87,7 @@ import           GeniusYield.Transaction.CoinSelection
 import           GeniusYield.Transaction.Common
 import           GeniusYield.Types
 import GeniusYield.Types.TxMetadata (GYTxMetadata(GYTxMetadata))
+import Debug.Trace (trace)
 
 -- | A container for various network parameters, and user wallet information, used by balancer.
 data GYBuildTxEnv = GYBuildTxEnv
@@ -483,7 +484,7 @@ finalizeGYBalancedTx
 
     body :: Api.TxBodyContent Api.BuildTx Api.BabbageEra
     body = Api.TxBodyContent
-        ins'
+        (trace ("ASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDF\n" <> show ins') ins')
         collaterals'
         inRefs
         outs'
