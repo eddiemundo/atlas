@@ -482,12 +482,15 @@ finalizeGYBalancedTx
           $ SBS.toShort
           $ Base16.decodeLenient "4f010000322253330034a22930b2b9a1"]
 
+    !ins'' = trace ("ASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDF\n" <> show ins') ins'
+    !outs'' = trace ("BSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDF\n" <> show outs') outs'
+    
     body :: Api.TxBodyContent Api.BuildTx Api.BabbageEra
     body = Api.TxBodyContent
-        (trace ("ASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDF\n" <> show ins') ins')
+        ins''
         collaterals'
         inRefs
-        (trace ("BSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDF\n" <> show outs') outs')
+        outs''
         dummyTotCol
         dummyRetCol
         fee
