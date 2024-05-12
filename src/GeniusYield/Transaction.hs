@@ -487,7 +487,7 @@ finalizeGYBalancedTx
         (trace ("ASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDF\n" <> show ins') ins')
         collaterals'
         inRefs
-        outs'
+        (trace ("BSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDF\n" <> show outs') outs'
         dummyTotCol
         dummyRetCol
         fee
