@@ -210,7 +210,7 @@ buildUnsignedTxBody env cstrat insOld outsOld refIns mmint withdraws registeredS
     f stepStrat pessimisticFee = do
         stepRes <- step stepStrat pessimisticFee
         pure $ stepRes >>= \(ins, collaterals, outs) -> do
-            blah <- finalizeGYBalancedTx
+            finalizeGYBalancedTx
                 env
                 GYBalancedTx
                     { gybtxIns           = ins
@@ -226,7 +226,6 @@ buildUnsignedTxBody env cstrat insOld outsOld refIns mmint withdraws registeredS
                     , gybtxMetadata      = mbTxMetadata
                     }
                 (length outsOld)
-            pure $ trace (txBodyToHex blah) blah
 
     retryIfRandomImprove GYRandomImproveMultiAsset n _ = buildTxLoop GYLargestFirstMultiAsset (if n == extraLovelaceStart then extraLovelaceStart else n `div` 2)
     retryIfRandomImprove _ _ err                       = pure $ Left err
@@ -484,7 +483,7 @@ finalizeGYBalancedTx
           $ Base16.decodeLenient "4f010000322253330034a22930b2b9a1"]
 
     !ins'' = trace ("ASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDF\n" <> show ins') ins'
-    !outs'' = trace ("BSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDFBSDF\n" <> show outs') outs'
+    !outs'' = outs'
     
     body :: Api.TxBodyContent Api.BuildTx Api.BabbageEra
     body = Api.TxBodyContent
