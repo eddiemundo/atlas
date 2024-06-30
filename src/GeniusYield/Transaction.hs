@@ -209,8 +209,8 @@ buildUnsignedTxBody env cstrat insOld outsOld refIns mmint withdraws registeredS
     f :: GYCoinSelectionStrategy -> Natural -> m (Either BuildTxException GYTxBody)
     f stepStrat pessimisticFee = do
         stepRes <- step stepStrat pessimisticFee
-        pure $ stepRes >>= \(ins, collaterals, outs) ->
-            finalizeGYBalancedTx
+        pure $ stepRes >>= \(ins, collaterals, outs) -> do
+            blah <- finalizeGYBalancedTx
                 env
                 GYBalancedTx
                     { gybtxIns           = ins
@@ -226,6 +226,7 @@ buildUnsignedTxBody env cstrat insOld outsOld refIns mmint withdraws registeredS
                     , gybtxMetadata      = mbTxMetadata
                     }
                 (length outsOld)
+            pure $ trace (txBodyToHex blah) blah
 
     retryIfRandomImprove GYRandomImproveMultiAsset n _ = buildTxLoop GYLargestFirstMultiAsset (if n == extraLovelaceStart then extraLovelaceStart else n `div` 2)
     retryIfRandomImprove _ _ err                       = pure $ Left err
