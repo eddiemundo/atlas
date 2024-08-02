@@ -24,21 +24,26 @@ providersMashupTests configs =
     [ testCase "Datum lookup - GYLookupDatum" $ do
         delayBySecond
         dats <- forM configs $ \config -> withCfgProviders config mempty $ \GYProviders {..} -> fromJust <$> gyLookupDatum "a7ed3e81ef2e98a85c8d5649ed6344b7f7b36a31103ab18395ef4e80b8cac565"  -- A datum hash seen at always fail script's address.
-        assertBool "Datums are not all equal" $ all (== head dats) (tail dats)
+        assertBool "Datums are not all equal" $ allEqual dats
     , testCase "Parameters" $ do
         paramsList <- forM configs $ \config -> withCfgProviders config mempty $ \provider -> do
            delayBySecond
-           protocolParams <- gyGetProtocolParameters provider
+           pp <- gyGetProtocolParameters provider
            delayBySecond
-           systemStart <- gyGetSystemStart provider
+           ss <- gyGetSystemStart provider
            delayBySecond
-           Api.EraHistory mode interpreter <- gyGetEraHistory provider  -- `mode` here doesn't appear to have `Eq` instance, comparing via it's `Show` instance should be fine.
+           Api.EraHistory interpreter <- gyGetEraHistory provider
            delayBySecond
-           stakePools <- gyGetStakePools provider
+           sp <- gyGetStakePools provider
            delayBySecond
            slotConfig' <- gyGetSlotConfig provider
-           pure (protocolParams, systemStart, (show mode, interpreter), stakePools, slotConfig')
-        assertBool "Parameters are not all equal" $ all (== head paramsList) (tail paramsList)
+           pure (pp, ss, interpreter, sp, slotConfig')
+        assertBool "Parameters are not all equal" $ allEqual paramsList
+    , testCase "Stake address info" $ do
+        saInfos <- forM configs $ \config -> withCfgProviders config mempty $ \GYProviders {..} -> do
+          delayBySecond
+          gyGetStakeAddressInfo $ unsafeStakeAddressFromText "stake_test1upx0fuqcjqs4h5vp687d8j2cng4y5wkmelc6wzm5szq04qsm5d0l6"
+        assertBool "Stake address info are not all equal" $ allEqual saInfos
     , testCase "Query UTxOs" $ do
         let
             -- Blockfrost is unable to get the preimage of the involved datum hash, thus it's being deleted for in our set so that test still passes.
@@ -48,7 +53,10 @@ providersMashupTests configs =
         utxosProviders <- forM configs $ \config -> withCfgProviders config mempty $ \provider -> do
           let alwaysFailAddress = unsafeAddressFromText "addr_test1wpgexmeunzsykesf42d4eqet5yvzeap6trjnflxqtkcf66g0kpnxt"
               alwaysFailCredential = GYPaymentCredentialByScript "51936f3c98a04b6609aa9b5c832ba1182cf43a58e534fcc05db09d69"  -- Credential of always fail script address.
-              myAddrList = [alwaysFailAddress]  -- always fail script's address. It has all the cases, reference scripts, inline datums, many UTxOs, etc.
+              ciWalletAddress = unsafeAddressFromText "addr_test1vqrlk2mckwgh60mtlga9nhnp70pztjls64ty589ud7tdd6ckynfpg"
+              ciWalletCredential = GYPaymentCredentialByKey "07fb2b78b3917d3f6bfa3a59de61f3c225cbf0d5564a1cbc6f96d6eb"  -- Could ofc be derived from address.
+              myAddrList = [alwaysFailAddress, ciWalletAddress]  -- always fail script's address. It has all the cases, reference scripts, inline datums, many UTxOs, etc. Besides it, CI wallet's address is also included.
+              myCredList = [alwaysFailCredential, ciWalletCredential]
           delayBySecond
           utxosAtAddresses' <- gyQueryUtxosAtAddresses provider myAddrList
           delayBySecond
@@ -67,22 +75,29 @@ providersMashupTests configs =
           delayBySecond
           utxosAtRefsWithDatums' <- gyQueryUtxosAtTxOutRefsWithDatums provider outputRefs
           delayBySecond
-          utxoAtRefWithDatum' <- runGYTxQueryMonadNode (cfgNetworkId config) provider $ utxoAtTxOutRefWithDatum refWithDatumHash
+          utxoAtRefWithDatum' <- runGYTxQueryMonadIO (cfgNetworkId config) provider $ utxoAtTxOutRefWithDatum refWithDatumHash
           delayBySecond
-          utxosAtScriptCredential <- runGYTxQueryMonadNode (cfgNetworkId config) provider $ utxosAtPaymentCredential alwaysFailCredential
+          utxosAtScriptCredential <- runGYTxQueryMonadIO (cfgNetworkId config) provider $ utxosAtPaymentCredential alwaysFailCredential Nothing
           delayBySecond
-          utxosAtKeyCredential <- runGYTxQueryMonadNode (cfgNetworkId config) provider $ utxosAtPaymentCredential $ GYPaymentCredentialByKey "07fb2b78b3917d3f6bfa3a59de61f3c225cbf0d5564a1cbc6f96d6eb"  -- Credential of CI wallet.
+          utxosAtScriptCredentialWithAsset <- runGYTxQueryMonadIO (cfgNetworkId config) provider $ utxosAtPaymentCredential alwaysFailCredential (Just "6d24161a60592755dcbcc2c1330bbe968f913acc15ec40f0be3873ee.61757468")
           delayBySecond
-          utxosAtScriptCredentialWithDatums <- runGYTxQueryMonadNode (cfgNetworkId config) provider $ utxosAtPaymentCredentialWithDatums alwaysFailCredential
+          utxosAtKeyCredential <- runGYTxQueryMonadIO (cfgNetworkId config) provider $ utxosAtPaymentCredential ciWalletCredential Nothing
+          delayBySecond
+          utxosAtScriptCredentialWithDatums <- runGYTxQueryMonadIO (cfgNetworkId config) provider $ utxosAtPaymentCredentialWithDatums alwaysFailCredential Nothing
           delayBySecond
           utxosAtScriptAddressWithAsset <- gyQueryUtxosAtAddress provider alwaysFailAddress (Just "6d24161a60592755dcbcc2c1330bbe968f913acc15ec40f0be3873ee.61757468")  -- An asset I saw by random chance.
+          -- TODO: Write variant of above for with datums.
+          delayBySecond
+          utxosAtPaymentCredentials' <- gyQueryUtxosAtPaymentCredentials provider myCredList
+          delayBySecond
+          utxosAtPaymentCredentialsWithDatums' <- gyQueryUtxosAtPaymentCredsWithDatums provider myCredList
           -- Following is commented out due to an apparent bug in Blockfrost.
           -- delayBySecond
           -- utxosAtScriptAddressWithAssetAndDatums <- gyQueryUtxosAtAddressWithDatums provider (unsafeAddressFromText "addr_test1wz2mzj532enpgu5vgwxuh249fpknx5ft9wxse2876z0mp2q89ye7k") (Just "c6e65ba7878b2f8ea0ad39287d3e2fd256dc5c4160fc19bdf4c4d87e.7447454e53")
-          pure (utxosAtAddresses', Set.fromList utxosAtAddressesWithDatums' `Set.difference` utxoBugSet, utxosAtRefs, Set.fromList utxoRefsAtAddress', Set.fromList utxosAtRefsWithDatums', utxoAtRefWithDatum', utxosAtScriptCredential <> utxosAtKeyCredential, Set.fromList utxosAtScriptCredentialWithDatums `Set.difference` utxoBugSet, utxosAtScriptAddressWithAsset
+          pure (utxosAtAddresses', Set.fromList utxosAtAddressesWithDatums' `Set.difference` utxoBugSet, utxosAtRefs, Set.fromList utxoRefsAtAddress', Set.fromList utxosAtRefsWithDatums', utxoAtRefWithDatum', utxosAtScriptCredential <> utxosAtKeyCredential, Set.fromList utxosAtScriptCredentialWithDatums `Set.difference` utxoBugSet, utxosAtScriptAddressWithAsset, utxosAtScriptCredentialWithAsset, utxosAtPaymentCredentials', Set.fromList utxosAtPaymentCredentialsWithDatums' `Set.difference` utxoBugSet
              -- , Set.fromList utxosAtScriptAddressWithAssetAndDatums
                )
-        assertBool "Utxos are not all equal" $ all (== head utxosProviders) (tail utxosProviders)
+        assertBool "Utxos are not all equal" $ allEqual utxosProviders
     , testCase "Checking presence of error message when submitting an invalid transaction" $ do
         let
             handler :: SubmitTxException -> IO GYTxId
@@ -90,7 +105,7 @@ providersMashupTests configs =
               let errorText = show e
               in ( if "BadInputsUTxO" `isInfixOf` errorText then
                      pure "6c751d3e198c5608dfafdfdffe16aeac8a28f88f3a769cf22dd45e8bc84f47e8"  -- Any transaction ID.
-                   else error "Not satisfied"
+                   else error $ "Not satisfied, error text: " <> errorText
                  )
         forM_ configs $ \config -> withCfgProviders config mempty $ \GYProviders {..} -> do
           delayBySecond
@@ -101,12 +116,12 @@ providersMashupTests configs =
             senderAddress = addressFromPaymentKeyHash GYTestnetPreprod $ paymentKeyHash $ paymentVerificationKey skey
         forM_ configs $ \config -> withCfgProviders config mempty $ \provider@GYProviders {..} -> do
           delayBySecond
-          senderUTxOs <- runGYTxQueryMonadNode nid provider $ utxosAtAddress senderAddress Nothing
+          senderUTxOs <- runGYTxQueryMonadIO nid provider $ utxosAtAddress senderAddress Nothing
           delayBySecond
           let totalSenderFunds = foldMapUTxOs utxoValue senderUTxOs
               valueToSend     = totalSenderFunds `valueMinus` valueFromLovelace 5_000_000
               -- This way, UTxO distribution in test wallet should remain same.
-          txBody <- runGYTxMonadNode nid provider [senderAddress] senderAddress Nothing $ pure $ mustHaveOutput $ mkGYTxOutNoDatum @'PlutusV2 senderAddress valueToSend
+          txBody <- runGYTxBuilderMonadIO nid provider [senderAddress] senderAddress Nothing $ buildTxBody $ mustHaveOutput $ mkGYTxOutNoDatum @'PlutusV2 senderAddress valueToSend
           delayBySecond
           let signedTxBody = signGYTxBody txBody [skey]
           printf "Signed tx: %s\n" (txToHex signedTxBody)
@@ -125,3 +140,7 @@ providersMashupTests configs =
     ]
   where
     delayBySecond = threadDelay 1_000_000
+
+allEqual :: Eq a => [a] -> Bool
+allEqual []     = True
+allEqual (x:xs) = all (== x) xs

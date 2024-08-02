@@ -81,11 +81,44 @@ module GeniusYield.Types.Script (
     mintingPolicyIdFromCurrencySymbol,
     mintingPolicyIdCurrencySymbol,
 
+    -- * StakeValidator
+    GYStakeValidator,
+    stakeValidatorVersion,
+    stakeValidatorVersionFromWitness,
+    stakeValidatorFromPlutus,
+    stakeValidatorFromSerialisedScript,
+    stakeValidatorToSerialisedScript,
+    stakeValidatorToApi,
+    stakeValidatorFromApi,
+    stakeValidatorToApiPlutusScriptWitness,
+
+    -- * Witness for stake validator
+    GYStakeValScript (..),
+    gyStakeValScriptToSerialisedScript,
+    gyStakeValScriptWitnessToApiPlutusSW,
+
+    -- ** Stake validator selectors
+    stakeValidatorHash,
+    stakeValidatorPlutusHash,
+    stakeValidatorApiHash,
+
+    -- * StakeValidatorHash
+    GYStakeValidatorHash,
+    stakeValidatorHashToApi,
+    stakeValidatorHashToPlutus,
+    stakeValidatorHashFromApi,
+    stakeValidatorHashFromPlutus,
+
+    -- ** File operations
+    writeStakeValidator,
+    readStakeValidator,
+
     -- * Script
     GYScript,
     scriptVersion,
     validatorToScript,
     mintingPolicyToScript,
+    stakeValidatorToScript,
     scriptToApi,
     scriptFromCBOR,
     scriptFromCBOR',
@@ -98,41 +131,49 @@ module GeniusYield.Types.Script (
     someScriptToReferenceApi,
     someScriptFromReferenceApi,
     referenceScriptToApiPlutusScriptWitness,
+    apiHashToPlutus,
 
     -- ** File operations
     writeScript,
     readScript,
+
+    -- * Any Script
+    GYAnyScript (..),
+
+    -- * Simple Script
+    module SimpleScript
 ) where
 
+import qualified Cardano.Api                           as Api
+import qualified Cardano.Api.Shelley                   as Api.S
+import           Control.Lens                          ((?~))
+import           Data.Aeson.Types                      (FromJSONKey (fromJSONKey),
+                                                        FromJSONKeyFunction (FromJSONKeyTextParser),
+                                                        ToJSONKey (toJSONKey),
+                                                        toJSONKeyText)
+import qualified Data.Attoparsec.ByteString.Char8      as Atto
+import           Data.ByteString                       (ByteString)
+import qualified Data.ByteString.Base16                as BS16
+import           Data.ByteString.Short                 (ShortByteString)
 import           Data.GADT.Compare
 import           Data.GADT.Show
-
-import qualified Cardano.Api                      as Api
-import qualified Cardano.Api.Shelley              as Api.S
-import           Control.Lens                     ((?~))
-import           Data.Aeson.Types                 (FromJSONKey (fromJSONKey),
-                                                   FromJSONKeyFunction (FromJSONKeyTextParser),
-                                                   ToJSONKey (toJSONKey),
-                                                   toJSONKeyText)
-import qualified Data.Attoparsec.ByteString.Char8 as Atto
-import qualified Data.ByteString.Base16           as BS16
-import qualified Data.Swagger                     as Swagger
-import qualified Data.Swagger.Internal.Schema     as Swagger
-import qualified Data.Text                        as Text
-import qualified Data.Text.Encoding               as TE
-import qualified PlutusLedgerApi.Common           as Plutus
-import qualified PlutusLedgerApi.V1               as PlutusV1
-import qualified PlutusTx
-import qualified PlutusTx.Builtins                as PlutusTx
-import qualified Text.Printf                      as Printf
-import qualified Web.HttpApiData                  as Web
-
-import           Data.ByteString                  (ByteString)
-import           Data.ByteString.Short            (ShortByteString)
+import qualified Data.Swagger                          as Swagger
+import qualified Data.Swagger.Internal.Schema          as Swagger
+import qualified Data.Text                             as Text
+import qualified Data.Text.Encoding                    as TE
 import           GeniusYield.Imports
-import           GeniusYield.Types.Ledger         (PlutusToCardanoError (..))
+import           GeniusYield.Types.Ledger              (PlutusToCardanoError (..))
 import           GeniusYield.Types.PlutusVersion
-import           GeniusYield.Types.TxOutRef       (GYTxOutRef, txOutRefToApi)
+import           GeniusYield.Types.Script.ScriptHash
+import           GeniusYield.Types.Script.SimpleScript as SimpleScript
+import           GeniusYield.Types.TxOutRef            (GYTxOutRef,
+                                                        txOutRefToApi)
+import qualified PlutusLedgerApi.Common                as Plutus
+import qualified PlutusLedgerApi.V1                    as PlutusV1
+import qualified PlutusTx
+import qualified PlutusTx.Builtins                     as PlutusTx
+import qualified Text.Printf                           as Printf
+import qualified Web.HttpApiData                       as Web
 
 -- $setup
 --
@@ -234,7 +275,7 @@ validatorHashFromApi = coerce
 -- Right (GYValidatorHash "cabdd19b58d4299fde05b53c2c0baf978bf9ade734b490fc0cc8b7d0")
 --
 -- >>> validatorHashFromPlutus "cabdd19b58d4299fde05b53c2c0baf978bf9ade734b490fc0cc8b7"
--- Left (DeserialiseRawBytesError {ptceTag = "validatorHashFromPlutus: cabdd19b58d4299fde05b53c2c0baf978bf9ade734b490fc0cc8b7, error: SerialiseAsRawBytesError {unSerialiseAsRawBytesError = \"Enable to deserialise ScriptHash\"}"})
+-- Left (DeserialiseRawBytesError {ptceTag = "validatorHashFromPlutus: cabdd19b58d4299fde05b53c2c0baf978bf9ade734b490fc0cc8b7, error: SerialiseAsRawBytesError {unSerialiseAsRawBytesError = \"Unable to deserialise ScriptHash\"}"})
 --
 validatorHashFromPlutus :: PlutusV1.ScriptHash -> Either PlutusToCardanoError GYValidatorHash
 validatorHashFromPlutus vh@(PlutusV1.ScriptHash ibs) =
@@ -243,37 +284,6 @@ validatorHashFromPlutus vh@(PlutusV1.ScriptHash ibs) =
         validatorHashFromApi
     $ Api.deserialiseFromRawBytes Api.AsScriptHash $ PlutusTx.fromBuiltin ibs
 
-newtype GYScriptHash = GYScriptHash Api.ScriptHash
-  deriving stock (Show, Eq, Ord)
-  deriving newtype (FromJSON, ToJSON)
-
--- |
---
--- >>> "cabdd19b58d4299fde05b53c2c0baf978bf9ade734b490fc0cc8b7d0" :: GYScriptHash
--- GYScriptHash "cabdd19b58d4299fde05b53c2c0baf978bf9ade734b490fc0cc8b7d0"
---
-instance IsString GYScriptHash where
-    fromString = GYScriptHash . fromString
-
--- |
---
--- >>> printf "%s" ("cabdd19b58d4299fde05b53c2c0baf978bf9ade734b490fc0cc8b7d0" :: GYScriptHash)
--- cabdd19b58d4299fde05b53c2c0baf978bf9ade734b490fc0cc8b7d0
---
-instance Printf.PrintfArg GYScriptHash where
-    formatArg (GYScriptHash h) = formatArg $ init $ tail $ show h
-
--- >>> Web.toUrlPiece (GYScriptHash "cabdd19b58d4299fde05b53c2c0baf978bf9ade734b490fc0cc8b7d0")
--- "cabdd19b58d4299fde05b53c2c0baf978bf9ade734b490fc0cc8b7d0"
---
-instance Web.ToHttpApiData GYScriptHash where
-    toUrlPiece = Api.serialiseToRawBytesHexText . scriptHashToApi
-
-scriptHashToApi :: GYScriptHash -> Api.ScriptHash
-scriptHashToApi = coerce
-
-scriptHashFromApi :: Api.ScriptHash -> GYScriptHash
-scriptHashFromApi = coerce
 
 -------------------------------------------------------------------------------
 -- Minting Policy
@@ -440,6 +450,9 @@ instance Web.FromHttpApiData GYMintingPolicyId where
           Left x    -> fail $ "Invalid currency symbol: " ++ show cs ++ "; Reason: " ++ show x
           Right cs' -> return $ mintingPolicyIdFromApi cs'
 
+instance Web.ToHttpApiData GYMintingPolicyId where
+  toUrlPiece = mintingPolicyIdToText
+
 instance Swagger.ToParamSchema GYMintingPolicyId where
   toParamSchema _ = mempty
       & Swagger.type_           ?~ Swagger.SwaggerString
@@ -486,6 +499,148 @@ mintingPolicyIdFromText policyid = bimap customError mintingPolicyIdFromApi
     $ TE.encodeUtf8 policyid
   where
     customError err = "Invalid minting policy: " ++ show policyid ++ "; Reason: " ++ show err
+
+-------------------------------------------------------------------------------
+-- Stake validator
+-------------------------------------------------------------------------------
+
+newtype GYStakeValidator v = GYStakeValidator (GYScript v)
+  deriving stock (Eq, Ord, Show)
+
+deriving newtype instance GEq GYStakeValidator
+deriving newtype instance GCompare GYStakeValidator
+
+instance GShow GYStakeValidator where
+  gshowsPrec = showsPrec
+
+stakeValidatorVersion :: GYStakeValidator v -> SingPlutusVersion v
+stakeValidatorVersion = coerce scriptVersion
+
+stakeValidatorVersionFromWitness :: GYStakeValScript v -> PlutusVersion
+stakeValidatorVersionFromWitness (GYStakeValScript mp) = fromSingPlutusVersion $ stakeValidatorVersion mp
+stakeValidatorVersionFromWitness (GYStakeValReference _ s) = fromSingPlutusVersion $ stakeValidatorVersion $ coerce s
+
+stakeValidatorFromPlutus :: forall v. SingPlutusVersionI v => PlutusTx.CompiledCode (PlutusTx.BuiltinData -> PlutusTx.BuiltinData -> ()) -> GYStakeValidator v
+stakeValidatorFromPlutus = coerce (scriptFromPlutus @v)
+
+stakeValidatorFromSerialisedScript :: forall v. SingPlutusVersionI v => Plutus.SerialisedScript -> GYStakeValidator v
+stakeValidatorFromSerialisedScript = coerce . scriptFromSerialisedScript
+
+stakeValidatorToSerialisedScript :: GYStakeValidator v -> Plutus.SerialisedScript
+stakeValidatorToSerialisedScript = coerce >>> scriptToSerialisedScript >>> coerce
+
+stakeValidatorToScript :: GYStakeValidator v -> GYScript v
+stakeValidatorToScript = coerce
+
+stakeValidatorToApi :: GYStakeValidator v -> Api.PlutusScript (PlutusVersionToApi v)
+stakeValidatorToApi = coerce scriptToApi
+
+stakeValidatorFromApi :: forall v. SingPlutusVersionI v => Api.PlutusScript (PlutusVersionToApi v) -> GYStakeValidator v
+stakeValidatorFromApi = coerce (scriptFromApi @v)
+
+stakeValidatorToApiPlutusScriptWitness
+    :: GYStakeValidator v
+    -> Api.ScriptRedeemer
+    -> Api.ExecutionUnits
+    -> Api.ScriptWitness Api.WitCtxStake Api.BabbageEra
+stakeValidatorToApiPlutusScriptWitness (GYStakeValidator s) =
+    scriptToApiPlutusScriptWitness s Api.NoScriptDatumForStake
+
+data GYStakeValScript (u :: PlutusVersion) where
+    -- | 'VersionIsGreaterOrEqual' restricts which version scripts can be used in this transaction.
+    GYStakeValScript    :: v `VersionIsGreaterOrEqual` u => GYStakeValidator v -> GYStakeValScript u
+
+    -- | Reference inputs can be only used in V2 transactions.
+    GYStakeValReference :: !GYTxOutRef -> !(GYScript 'PlutusV2) -> GYStakeValScript 'PlutusV2
+
+deriving instance Show (GYStakeValScript v)
+
+instance Eq (GYStakeValScript v) where
+    GYStakeValReference r s == GYStakeValReference r' s' = r == r' && s == s'
+    GYStakeValScript p == GYStakeValScript p'            = defaultEq p p'
+    _ == _                                               = False
+
+instance Ord (GYStakeValScript v) where
+    GYStakeValReference r s `compare` GYStakeValReference r' s' = compare r r' <> compare s s'
+    GYStakeValReference _ _ `compare` _ = LT
+    GYStakeValScript p `compare` GYStakeValScript p' = defaultCompare p p'
+    GYStakeValScript _ `compare` _ = GT
+
+gyStakeValScriptToSerialisedScript :: GYStakeValScript u -> Plutus.SerialisedScript
+gyStakeValScriptToSerialisedScript (GYStakeValScript mp) = coerce mp & scriptToSerialisedScript & coerce
+gyStakeValScriptToSerialisedScript (GYStakeValReference _ s) = scriptToSerialisedScript s & coerce
+
+gyStakeValScriptWitnessToApiPlutusSW
+  :: GYStakeValScript u
+  -> Api.S.ScriptRedeemer
+  -> Api.S.ExecutionUnits
+  -> Api.S.ScriptWitness Api.S.WitCtxStake Api.S.BabbageEra
+gyStakeValScriptWitnessToApiPlutusSW (GYStakeValScript p) = stakeValidatorToApiPlutusScriptWitness p
+gyStakeValScriptWitnessToApiPlutusSW (GYStakeValReference r s) =
+    referenceScriptToApiPlutusScriptWitness r s
+    Api.NoScriptDatumForStake
+
+stakeValidatorHash :: GYStakeValidator v -> GYStakeValidatorHash
+stakeValidatorHash = coerce scriptApiHash
+
+stakeValidatorPlutusHash :: GYStakeValidator v -> PlutusV1.ScriptHash
+stakeValidatorPlutusHash = coerce scriptPlutusHash
+
+stakeValidatorApiHash :: GYStakeValidator v -> Api.ScriptHash
+stakeValidatorApiHash = coerce scriptApiHash
+
+newtype GYStakeValidatorHash = GYStakeValidatorHash Api.ScriptHash
+  deriving stock (Show, Eq, Ord)
+
+-- |
+--
+-- >>> "cabdd19b58d4299fde05b53c2c0baf978bf9ade734b490fc0cc8b7d0" :: GYStakeValidatorHash
+-- GYStakeValidatorHash "cabdd19b58d4299fde05b53c2c0baf978bf9ade734b490fc0cc8b7d0"
+--
+instance IsString GYStakeValidatorHash where
+    fromString = GYStakeValidatorHash . fromString
+
+-- |
+--
+-- >>> printf "%s" ("cabdd19b58d4299fde05b53c2c0baf978bf9ade734b490fc0cc8b7d0" :: GYStakeValidatorHash)
+-- cabdd19b58d4299fde05b53c2c0baf978bf9ade734b490fc0cc8b7d0
+--
+instance Printf.PrintfArg GYStakeValidatorHash where
+    formatArg (GYStakeValidatorHash h) = formatArg $ init $ tail $ show h
+
+stakeValidatorHashToPlutus :: GYStakeValidatorHash -> PlutusV1.ScriptHash
+stakeValidatorHashToPlutus = apiHashToPlutus . stakeValidatorHashToApi
+
+stakeValidatorHashToApi :: GYStakeValidatorHash -> Api.ScriptHash
+stakeValidatorHashToApi = coerce
+
+stakeValidatorHashFromApi :: Api.ScriptHash -> GYStakeValidatorHash
+stakeValidatorHashFromApi = coerce
+
+-- |
+--
+-- >>> stakeValidatorHashFromPlutus "cabdd19b58d4299fde05b53c2c0baf978bf9ade734b490fc0cc8b7d0"
+-- Right (GYStakeValidatorHash "cabdd19b58d4299fde05b53c2c0baf978bf9ade734b490fc0cc8b7d0")
+--
+-- >>> stakeValidatorHashFromPlutus "cabdd19b58d4299fde05b53c2c0baf978bf9ade734b490fc0cc8b7"
+-- Left (DeserialiseRawBytesError {ptceTag = "stakeValidatorHashFromPlutus: cabdd19b58d4299fde05b53c2c0baf978bf9ade734b490fc0cc8b7, error: SerialiseAsRawBytesError {unSerialiseAsRawBytesError = \"Unable to deserialise ScriptHash\"}"})
+--
+stakeValidatorHashFromPlutus :: PlutusV1.ScriptHash -> Either PlutusToCardanoError GYStakeValidatorHash
+stakeValidatorHashFromPlutus vh@(PlutusV1.ScriptHash ibs) =
+    bimap
+        (\e -> DeserialiseRawBytesError $ Text.pack $ "stakeValidatorHashFromPlutus: " <> show vh <> ", error: " <> show e)
+        stakeValidatorHashFromApi
+    $ Api.deserialiseFromRawBytes Api.AsScriptHash $ PlutusTx.fromBuiltin ibs
+
+-- | Writes a stake validator to a file.
+--
+writeStakeValidator :: FilePath -> GYStakeValidator v -> IO ()
+writeStakeValidator file = writeScriptCore "Stake Validator" file . coerce
+
+-- | Reads a stake validator from a file.
+--
+readStakeValidator :: SingPlutusVersionI v => FilePath -> IO (GYStakeValidator v)
+readStakeValidator = coerce readScript
 
 -------------------------------------------------------------------------------
 -- Script
@@ -550,11 +705,13 @@ scriptVersion (GYScript v _ _) = v
 scriptToApi :: GYScript v -> Api.PlutusScript (PlutusVersionToApi v)
 scriptToApi (GYScript _ api _) = api
 
+-- FIXME: Should we use Conway here?
 someScriptToReferenceApi :: Some GYScript -> Api.S.ReferenceScript Api.S.BabbageEra
 someScriptToReferenceApi (Some (GYScript v apiScript _)) =
-    Api.S.ReferenceScript Api.S.ReferenceTxInsScriptsInlineDatumsInBabbageEra $
-    Api.ScriptInAnyLang (Api.PlutusScriptLanguage v') $
-    Api.PlutusScript v' apiScript
+    Api.S.ReferenceScript
+      Api.S.BabbageEraOnwardsBabbage $
+      Api.ScriptInAnyLang (Api.PlutusScriptLanguage v') $
+        Api.PlutusScript v' apiScript
   where
     v' = singPlutusVersionToApi v
 
@@ -563,19 +720,41 @@ someScriptToReferenceApi (Some (GYScript v apiScript _)) =
 -- /Note/: Simple scripts are converted to 'Nothing'.
 someScriptFromReferenceApi :: Api.S.ReferenceScript era -> Maybe (Some GYScript)
 someScriptFromReferenceApi Api.S.ReferenceScriptNone = Nothing
-someScriptFromReferenceApi (Api.S.ReferenceScript Api.S.ReferenceTxInsScriptsInlineDatumsInBabbageEra (Api.ScriptInAnyLang Api.SimpleScriptLanguage _)) = Nothing
-someScriptFromReferenceApi (Api.S.ReferenceScript Api.S.ReferenceTxInsScriptsInlineDatumsInBabbageEra (Api.ScriptInAnyLang (Api.PlutusScriptLanguage Api.PlutusScriptV1) (Api.PlutusScript _ x))) = Just (Some y)
+someScriptFromReferenceApi
+  (Api.S.ReferenceScript Api.S.BabbageEraOnwardsBabbage
+    (Api.ScriptInAnyLang Api.SimpleScriptLanguage _)) = Nothing
+someScriptFromReferenceApi
+  (Api.S.ReferenceScript Api.S.BabbageEraOnwardsBabbage
+    (Api.ScriptInAnyLang
+      (Api.PlutusScriptLanguage Api.PlutusScriptV1)
+      (Api.PlutusScript _ x)
+    )
+  ) = Just (Some y)
   where
     y :: GYScript 'PlutusV1
     y = scriptFromApi x
 
-someScriptFromReferenceApi (Api.S.ReferenceScript Api.S.ReferenceTxInsScriptsInlineDatumsInBabbageEra (Api.ScriptInAnyLang (Api.PlutusScriptLanguage Api.PlutusScriptV2) (Api.PlutusScript _ x))) = Just (Some y)
+someScriptFromReferenceApi
+  (Api.S.ReferenceScript Api.S.BabbageEraOnwardsBabbage
+    (Api.ScriptInAnyLang
+      (Api.PlutusScriptLanguage Api.PlutusScriptV2)
+      (Api.PlutusScript _ x)
+    )
+  ) = Just (Some y)
   where
     y :: GYScript 'PlutusV2
     y = scriptFromApi x
--- TODO: Following patterns should be fixed when Conway unleashes!
-someScriptFromReferenceApi (Api.S.ReferenceScript Api.S.ReferenceTxInsScriptsInlineDatumsInBabbageEra (Api.ScriptInAnyLang (Api.PlutusScriptLanguage Api.PlutusScriptV3) (Api.PlutusScript _ _))) = Nothing
-someScriptFromReferenceApi (Api.S.ReferenceScript Api.S.ReferenceTxInsScriptsInlineDatumsInConwayEra _) = Nothing
+
+-- FIXME: V3 is not possible in Babbage, shold we indicate it?
+someScriptFromReferenceApi
+  (Api.S.ReferenceScript Api.S.BabbageEraOnwardsBabbage
+    (Api.ScriptInAnyLang
+      (Api.PlutusScriptLanguage Api.PlutusScriptV3)
+      (Api.PlutusScript _ _))) = Nothing
+
+-- TODO: Add definitions for Conway
+someScriptFromReferenceApi
+  (Api.S.ReferenceScript Api.S.BabbageEraOnwardsConway _) = Nothing
 
 scriptFromApi :: forall v. SingPlutusVersionI v => Api.PlutusScript (PlutusVersionToApi v) -> GYScript v
 scriptFromApi script = GYScript v script apiHash
@@ -671,3 +850,15 @@ writeScriptCore desc file s = do
     case e of
         Left (err :: Api.FileError ()) -> throwIO $ userError $ show err
         Right ()                       -> return ()
+
+-- | Type encapsulating both simple and plutus scripts.
+data GYAnyScript where
+    GYSimpleScript :: !GYSimpleScript -> GYAnyScript
+    GYPlutusScript :: forall v. !(GYScript v) -> GYAnyScript
+
+deriving instance Show GYAnyScript
+
+instance Eq GYAnyScript where
+  GYSimpleScript s1 == GYSimpleScript s2 = s1 == s2
+  GYPlutusScript s1 == GYPlutusScript s2 = defaultEq s1 s2
+  _ == _                                 = False

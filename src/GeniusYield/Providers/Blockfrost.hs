@@ -9,12 +9,14 @@ module GeniusYield.Providers.Blockfrost
     , blockfrostGetSlotOfCurrentBlock
     , blockfrostSubmitTx
     , blockfrostAwaitTxConfirmed
+    , blockfrostStakeAddressInfo
     , networkIdToProject
     ) where
 
 import qualified Blockfrost.Client                    as Blockfrost
 import qualified Cardano.Api                          as Api
 import qualified Cardano.Api.Shelley                  as Api.S
+import qualified Cardano.Ledger.BaseTypes             as Ledger
 import qualified Cardano.Slotting.Slot                as CSlot
 import qualified Cardano.Slotting.Time                as CTime
 import           Control.Concurrent                   (threadDelay)
@@ -182,6 +184,8 @@ blockfrostQueryUtxo proj = GYQueryUTxO
     , gyQueryUtxosAtAddressesWithDatums'   = Nothing  -- Will use the default implementation.
     , gyQueryUtxosAtPaymentCredential'     = blockfrostUtxosAtPaymentCredential proj
     , gyQueryUtxosAtPaymentCredWithDatums' = Nothing  -- Will use the default implementation.
+    , gyQueryUtxosAtPaymentCredentials'    = gyQueryUtxoAtPaymentCredentialsDefault $ blockfrostUtxosAtPaymentCredential proj
+    , gyQueryUtxosAtPaymentCredsWithDatums' = Nothing  -- Will use the default implementation.
     }
 
 transformUtxo :: (Blockfrost.AddressUtxo, Maybe (Some GYScript)) -> Either SomeDeserializeError GYUTxO
@@ -219,13 +223,16 @@ blockfrostUtxosAtAddress proj addr mAssetClass = do
     handler (Left Blockfrost.BlockfrostNotFound) = pure []
     handler other                                = handleBlockfrostError locationIdent other
 
-blockfrostUtxosAtPaymentCredential :: Blockfrost.Project -> GYPaymentCredential -> IO GYUTxOs
-blockfrostUtxosAtPaymentCredential proj cred = do
+blockfrostUtxosAtPaymentCredential :: Blockfrost.Project -> GYPaymentCredential -> Maybe GYAssetClass -> IO GYUTxOs
+blockfrostUtxosAtPaymentCredential proj cred mAssetClass = do
+    let extractedAssetClass = extractAssetClass mAssetClass
     {- 'Blockfrost.getAddressUtxos' doesn't return all utxos at that address, only the first 100 or so.
     Have to handle paging manually for all. -}
     credUtxos  <- handler <=< Blockfrost.runBlockfrost proj
         . Blockfrost.allPages $ \paged ->
-            Blockfrost.getAddressUtxos' (gyPaymentCredentialToBlockfrost cred) paged Blockfrost.Ascending
+            case extractedAssetClass of
+                Nothing -> Blockfrost.getAddressUtxos' (gyPaymentCredentialToBlockfrost cred) paged Blockfrost.Ascending
+                Just (ac, tn) -> Blockfrost.getAddressUtxosAsset' (gyPaymentCredentialToBlockfrost cred) (Blockfrost.mkAssetId $ ac <> tn) paged Blockfrost.Ascending
     credUtxos' <- mapM (\x -> lookupScriptHashIO proj (Blockfrost._addressUtxoReferenceScriptHash x) >>= \mrs -> return (x, mrs)) credUtxos
     case traverse transformUtxo credUtxos' of
       Left err -> throwIO $ BlpvDeserializeFailure locationIdent err
@@ -351,16 +358,11 @@ blockfrostProtocolParams proj = do
         , protocolParamStakeAddressDeposit = Api.Lovelace $ lovelacesToInteger _protocolParamsKeyDeposit
         , protocolParamStakePoolDeposit    = Api.Lovelace $ lovelacesToInteger _protocolParamsPoolDeposit
         , protocolParamMinPoolCost         = Api.Lovelace $ lovelacesToInteger _protocolParamsMinPoolCost
-        , protocolParamPoolRetireMaxEpoch  = Api.EpochNo $ fromInteger _protocolParamsEMax
+        , protocolParamPoolRetireMaxEpoch  = Ledger.EpochInterval $ fromInteger _protocolParamsEMax
         , protocolParamStakePoolTargetNum  = fromInteger _protocolParamsNOpt
         , protocolParamPoolPledgeInfluence = _protocolParamsA0
         , protocolParamMonetaryExpansion   = _protocolParamsRho
         , protocolParamTreasuryCut         = _protocolParamsTau
-        , protocolParamUTxOCostPerWord     = Nothing  -- Deprecated in Babbage.
-        -- , protocolParamUTxOCostPerWord     = if majorProtVers < babbageProtocolVersion
-        --                                         -- This is only used for pre-babbage protocols.
-        --                                         then Just . Api.Lovelace $ lovelacesToInteger _protocolParamsCoinsPerUtxoWord
-        --                                         else Nothing
         , protocolParamPrices              = Just $ Api.S.ExecutionUnitPrices _protocolParamsPriceStep _protocolParamsPriceMem
         , protocolParamMaxTxExUnits        = Just $ Api.ExecutionUnits (fromInteger $ Blockfrost.unQuantity _protocolParamsMaxTxExSteps) (fromInteger $ Blockfrost.unQuantity _protocolParamsMaxTxExMem)
         , protocolParamMaxBlockExUnits     = Just $ Api.ExecutionUnits (fromInteger $ Blockfrost.unQuantity _protocolParamsMaxBlockExSteps) (fromInteger $ Blockfrost.unQuantity _protocolParamsMaxBlockExMem)
@@ -403,7 +405,7 @@ blockfrostSystemStart proj = do
   genesisParams <- Blockfrost.runBlockfrost proj Blockfrost.getLedgerGenesis >>= handleBlockfrostError "LedgerGenesis"
   pure . CTime.SystemStart . Time.posixSecondsToUTCTime $ Blockfrost._genesisSystemStart genesisParams
 
-blockfrostEraHistory :: Blockfrost.Project -> IO (Api.EraHistory Api.CardanoMode)
+blockfrostEraHistory :: Blockfrost.Project -> IO Api.EraHistory
 blockfrostEraHistory proj = do
   eraSumms <- Blockfrost.runBlockfrost proj Blockfrost.getNetworkEras >>= handleBlockfrostError "EraHistory"
   maybe (throwIO $ BlpvIncorrectEraHistoryLength eraSumms) pure $ parseEraHist mkEra eraSumms
@@ -432,14 +434,32 @@ blockfrostLookupDatum :: Blockfrost.Project -> GYLookupDatum
 blockfrostLookupDatum p dh = do
     datumMaybe <- handler <=< Blockfrost.runBlockfrost p
         . Blockfrost.getScriptDatum . Blockfrost.DatumHash . Text.pack . show $ datumHashToPlutus dh
-    sequence $ datumMaybe <&> \(Blockfrost.ScriptDatum v) -> case fromJson @Plutus.BuiltinData (Aeson.encode v) of
+    mapM (\(Blockfrost.ScriptDatum v) -> case fromJson @Plutus.BuiltinData (Aeson.encode v) of
       Left err -> throwIO $ BlpvDeserializeFailure locationIdent err
-      Right bd -> pure $ datumFromPlutus' bd
+      Right bd -> pure $ datumFromPlutus' bd) datumMaybe
   where
     -- This particular error is fine in this case, we can just return 'Nothing'.
     handler (Left Blockfrost.BlockfrostNotFound) = pure Nothing
     handler other                                = handleBlockfrostError locationIdent $ Just <$> other
     locationIdent = "LookupDatum"
+
+-------------------------------------------------------------------------------
+-- Account info
+-------------------------------------------------------------------------------
+
+blockfrostStakeAddressInfo :: Blockfrost.Project -> GYStakeAddress -> IO (Maybe GYStakeAddressInfo)
+blockfrostStakeAddressInfo p saddr = do
+  Blockfrost.runBlockfrost p (Blockfrost.getAccount (Blockfrost.mkAddress $ stakeAddressToText saddr)) >>= handler
+  where
+    -- This particular error is fine.
+    handler (Left Blockfrost.BlockfrostNotFound) = pure Nothing
+    handler other                                = handleBlockfrostError "Account" $ other <&> \accInfo ->
+        if Blockfrost._accountInfoActive accInfo then Just $
+            GYStakeAddressInfo
+                { gyStakeAddressInfoDelegatedPool = Blockfrost._accountInfoPoolId accInfo >>= stakePoolIdFromTextMaybe . Blockfrost.unPoolId
+                , gyStakeAddressInfoAvailableRewards = fromInteger $ lovelacesToInteger $ Blockfrost._accountInfoWithdrawableAmount accInfo
+                }
+        else Nothing
 
 -------------------------------------------------------------------------------
 -- Auxiliary functions
@@ -461,7 +481,7 @@ networkIdToBlockfrost GYTestnetPreprod = Blockfrost.Preprod
 networkIdToBlockfrost GYTestnetPreview = Blockfrost.Preview
 networkIdToBlockfrost GYTestnetLegacy  = Blockfrost.Testnet
 -- TODO: we need another mechanism to query private network data
-networkIdToBlockfrost GYPrivnet        = error "Private network is not supported by Blockfrost"
+networkIdToBlockfrost GYPrivnet{}      = error "Private network is not supported by Blockfrost"
 
 datumHashFromBlockfrost :: Blockfrost.DatumHash -> Either SomeDeserializeError GYDatumHash
 datumHashFromBlockfrost = first (DeserializeErrorHex . Text.pack) . datumHashFromHexE . Text.unpack . Blockfrost.unDatumHash

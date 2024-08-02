@@ -21,6 +21,7 @@ module GeniusYield.Types.TxBody (
     makeSignedTransaction',
     appendWitnessGYTx,
     signGYTx,
+    signGYTx',
     -- * Functions
     txBodyFromHex,
     txBodyFromHexBS,
@@ -81,11 +82,19 @@ signGYTxBody = signTx
 
 {-# DEPRECATED signTx "Use signGYTxBody." #-}
 signTx :: ToShelleyWitnessSigningKey a =>  GYTxBody -> [a] -> GYTx
-signTx (GYTxBody txBody) skeys = txFromApi $ Api.signShelleyTransaction txBody $ map toShelleyWitnessSigningKey skeys
+signTx (GYTxBody txBody) skeys = txFromApi
+  $ Api.signShelleyTransaction
+      Api.ShelleyBasedEraBabbage
+      txBody
+      $ map toShelleyWitnessSigningKey skeys
 
 -- | Sign a transaction body with (potentially) multiple keys of potentially different nature.
 signGYTxBody' :: GYTxBody -> [GYSomeSigningKey] -> GYTx
-signGYTxBody' (txBodyToApi -> txBody) skeys = txFromApi $ Api.signShelleyTransaction txBody $ map (\(GYSomeSigningKey a) -> toShelleyWitnessSigningKey a) skeys
+signGYTxBody' (txBodyToApi -> txBody) skeys = txFromApi
+  $ Api.signShelleyTransaction
+      Api.ShelleyBasedEraBabbage
+      txBody
+      $ map (\(GYSomeSigningKey a) -> toShelleyWitnessSigningKey a) skeys
 
 -- | Make a signed transaction given the transaction body & list of key witnesses, represented in `GYTxWitness`.
 makeSignedTransaction :: GYTxWitness -> GYTxBody -> GYTx
@@ -107,10 +116,21 @@ appendWitnessGYTx' appendKeyWitnessList previousTx =
 
 -- | Sign a transaction with (potentially) multiple keys and add your witness(s) among previous key witnesses, if any.
 signGYTx :: ToShelleyWitnessSigningKey a =>  GYTx -> [a] -> GYTx
-signGYTx previousTx skeys =  -- Though could have been written in terms of `appendWitnessGYTx'` but that would duplicate work to obtain @txBody@ as it's also required here to get for `appendKeyWitnessList`.
+signGYTx previousTx skeys = signGYTx'' previousTx $ map toShelleyWitnessSigningKey skeys
+
+-- | Sign a transaction with (potentially) multiple keys and add your witness(s) among previous key witnesses, if any.
+signGYTx'' :: GYTx -> [Api.ShelleyWitnessSigningKey] -> GYTx
+signGYTx'' previousTx skeys =
+  -- Though could have been written in terms of `appendWitnessGYTx'`
+  -- but that would duplicate work to obtain @txBody@ as it's also
+  -- required here to get for `appendKeyWitnessList`.
   let (txBody, previousKeyWitnessesList) = Api.S.getTxBodyAndWitnesses $ txToApi previousTx
-      appendKeyWitnessList = map (Api.makeShelleyKeyWitness txBody . toShelleyWitnessSigningKey) skeys
+      appendKeyWitnessList = map (Api.makeShelleyKeyWitness Api.ShelleyBasedEraBabbage txBody) skeys
   in makeSignedTransaction' (previousKeyWitnessesList ++ appendKeyWitnessList) txBody
+
+-- | Sign a transaction with (potentially) multiple keys of potentially different nature and add your witness(s) among previous key witnesses, if any.
+signGYTx' :: GYTx -> [GYSomeSigningKey] -> GYTx
+signGYTx' previousTx skeys = signGYTx'' previousTx (map (\(GYSomeSigningKey a) -> toShelleyWitnessSigningKey a) skeys)
 
 -- | Create an unsigned transaction from the body.
 unsignedTx :: GYTxBody -> GYTx
@@ -150,7 +170,6 @@ txBodyToCBOR = Api.serialiseToCBOR . txBodyToApi
 txBodyFee :: GYTxBody -> Integer
 txBodyFee (GYTxBody (Api.TxBody Api.TxBodyContent { Api.txFee = fee })) =
     case fee of
-        Api.TxFeeImplicit x                       -> case x of {}
         Api.TxFeeExplicit _ (Api.Lovelace actual) -> actual
 
 -- | Return the fees as 'GYValue'.
@@ -175,7 +194,7 @@ txBodyTxIns (GYTxBody (Api.TxBody Api.TxBodyContent {txIns})) = map (txOutRefFro
 txBodyTxInsReference :: GYTxBody -> [GYTxOutRef]
 txBodyTxInsReference (GYTxBody (Api.TxBody Api.TxBodyContent {txInsReference})) = case txInsReference of
   Api.TxInsReferenceNone                                                        -> []
-  Api.TxInsReference Api.S.ReferenceTxInsScriptsInlineDatumsInBabbageEra inRefs -> map txOutRefFromApi inRefs
+  Api.TxInsReference Api.S.BabbageEraOnwardsBabbage inRefs -> map txOutRefFromApi inRefs
 
 -- | Returns the 'GYTxId' of the given 'GYTxBody'.
 txBodyTxId :: GYTxBody -> GYTxId
@@ -202,7 +221,9 @@ txBodyMintValue body = case Api.txMintValue $ txBodyToApiTxBodyContent body  of
 
 -- | Returns the validity range of the given 'GYTxBody'.
 txBodyValidityRange :: GYTxBody -> (Maybe GYSlot, Maybe GYSlot)
-txBodyValidityRange body = case Api.txValidityRange $ txBodyToApiTxBodyContent body of
+txBodyValidityRange body =
+  let cnt = txBodyToApiTxBodyContent body
+  in case (Api.txValidityLowerBound cnt, Api.txValidityUpperBound cnt)  of
     (lb, ub) -> (f lb, g ub)
   where
     f :: Api.TxValidityLowerBound Api.BabbageEra -> Maybe GYSlot
@@ -210,8 +231,8 @@ txBodyValidityRange body = case Api.txValidityRange $ txBodyToApiTxBodyContent b
     f (Api.TxValidityLowerBound _ sn) = Just $ slotFromApi sn
 
     g :: Api.TxValidityUpperBound Api.BabbageEra -> Maybe GYSlot
-    g (Api.TxValidityNoUpperBound _)  = Nothing
-    g (Api.TxValidityUpperBound _ sn) = Just $ slotFromApi sn
+    g (Api.TxValidityUpperBound _ Nothing) = Nothing
+    g (Api.TxValidityUpperBound _ (Just sn)) = Just $ slotFromApi sn
 
 -- | Returns the set of 'GYTxOutRef' used as collateral in the given 'GYTxBody'.
 txBodyCollateral :: GYTxBody -> Set GYTxOutRef

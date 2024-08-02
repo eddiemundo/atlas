@@ -5,6 +5,8 @@ module GeniusYield.Test.GYTxBody
 
 import qualified Cardano.Api                          as Api
 import qualified Cardano.Api.Shelley                  as Api.S
+import qualified Cardano.Ledger.Alonzo.Core           as AlonzoCore
+import           Data.Coerce                          (coerce)
 import qualified Data.Set                             as Set (empty)
 import           Data.Time.Clock.POSIX                (posixSecondsToUTCTime)
 import           Numeric.Natural                      (Natural)
@@ -12,11 +14,8 @@ import           Test.Tasty                           (TestTree, testGroup)
 import           Test.Tasty.HUnit                     (Assertion, testCase,
                                                        (@?=))
 
-import           Cardano.Simple.Ledger.TimeSlot       (scSlotLength,
-                                                       scSlotZeroTime)
-import           Plutus.Model.Mock.MockConfig         (defaultSlotConfig)
-import           Plutus.Model.Mock.ProtocolParameters (PParams (BabbageParams),
-                                                       defaultBabbageParams)
+import           Clb.MockConfig                       (defaultBabbageParams, defaultSlotConfig)
+import           Clb.TimeSlot                         (SlotConfig (..))
 
 import           GeniusYield.Types.Address            (GYAddress,
                                                        unsafeAddressFromText)
@@ -42,7 +41,7 @@ import           GeniusYield.Providers.Common         (mainnetEraHist)
 import           GeniusYield.Transaction              (GYBuildTxEnv (..),
                                                        GYCoinSelectionStrategy (..),
                                                        balanceTxStep)
-import           GeniusYield.Transaction.Common       (BalancingError (..),
+import           GeniusYield.Transaction.Common       (GYBalancingError (..),
                                                        adjustTxOut, minimumUTxO)
 -------------------------------------------------------------------------------
 -- Tests
@@ -60,7 +59,7 @@ adjustTxTests =
     , testCase "Few ADA" $
         2_000_000 `lovelacesAdjustedShouldEqual` 2_000_000
     , testCase "Very Few ADA" $
-        100_000 `lovelacesAdjustedShouldEqual` 978_370
+        100_000 `lovelacesAdjustedShouldEqual` 969_750
     , testCase "ADA and Assets" $ do
         let val = valueFromList [ (GYLovelace, 10_000_000)
                                   , (mockAsset "A", 100)
@@ -78,7 +77,7 @@ adjustTxTests =
                                 , (mockAsset "A", 100)
                                 , (mockAsset "B", 200)
                                 ]
-        val `adjustedShouldEqual` (val <> valueFromLovelace 1_055_080)
+        val `adjustedShouldEqual` (val <> valueFromLovelace 1_046_460)
     , testCase "Very Few ADA and a lot of Assets" $ do
         let val = valueFromList [ (GYLovelace, 100_000)
                                 , (mockAsset "A", 1000)
@@ -90,7 +89,7 @@ adjustTxTests =
                                 , (mockAsset "G", 7000)
                                 , (mockAsset "H", 8000)
                                 ]
-        val `adjustedShouldEqual` (val <> valueFromLovelace 1_193_000)
+        val `adjustedShouldEqual` (val <> valueFromLovelace 1_184_380)
     ]
   where
     mockAdjust :: GYTxOut v -> GYTxOut v
@@ -112,15 +111,17 @@ balanceTxStepTests =
         res <- balanceTxStep
                 (mockBuildTxEnv mempty)
                 Nothing
+                [] []
                 []
                 []
                 GYRandomImproveMultiAsset
                 2_000_000
-        res @?= Left BalancingErrorEmptyOwnUTxOs
+        res @?= Left GYBalancingErrorEmptyOwnUTxOs
     , testCase "No collateral needed" $ do
         Right (_, collaterals, _) <- balanceTxStep
                                         (mockBuildTxEnv [valueFromLovelace 10_000_000])
                                         Nothing
+                                        [] []
                                         []
                                         []
                                         GYRandomImproveMultiAsset
@@ -131,6 +132,7 @@ balanceTxStepTests =
         Right (_, collaterals, _) <- balanceTxStep
                                         (mockBuildTxEnv [valueFromLovelace 10_000_000])
                                         (Just (valueSingleton (mockAsset "A") 100, []))
+                                        [] []
                                         []
                                         []
                                         GYRandomImproveMultiAsset
@@ -163,12 +165,8 @@ mockTxOutRef = "4293386fef391299c9886dc0ef3e8676cbdbc2c9f2773507f1f838e00043a189
 mockAsset :: GYTokenName -> GYAssetClass
 mockAsset = GYToken "005eaf690cba88f441494e42f5edce9bd7f595c56f99687e2fa0aad4"
 
-mockProtocolParams :: Api.BundledProtocolParameters Api.S.BabbageEra
-mockProtocolParams = Api.BundleAsShelleyBasedProtocolParameters Api.ShelleyBasedEraBabbage (Api.S.fromLedgerPParams Api.ShelleyBasedEraBabbage params) params
- where
-    params = case defaultBabbageParams of
-        BabbageParams p -> p
-        _               -> error "Impossible"
+mockProtocolParams :: AlonzoCore.PParams (Api.S.ShelleyLedgerEra Api.S.BabbageEra)
+mockProtocolParams = coerce defaultBabbageParams
 
 collateralUtxo :: GYUTxO
 collateralUtxo = GYUTxO
@@ -182,7 +180,7 @@ collateralUtxo = GYUTxO
 mockBuildTxEnv :: [GYValue] -> GYBuildTxEnv
 mockBuildTxEnv wallet = GYBuildTxEnv
     { gyBTxEnvSystemStart    = mockSystemStart
-    , gyBTxEnvEraHistory     = Api.EraHistory Api.CardanoMode mainnetEraHist
+    , gyBTxEnvEraHistory     = Api.EraHistory mainnetEraHist
     , gyBTxEnvProtocolParams = mockProtocolParams
     , gyBTxEnvPools          = Set.empty
     , gyBTxEnvOwnUtxos       = buildOwnUtxos wallet

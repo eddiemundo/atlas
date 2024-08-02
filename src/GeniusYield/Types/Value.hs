@@ -28,6 +28,7 @@ module GeniusYield.Types.Value (
     valueFromApiTxOutValue,
     valueToApiTxOutValue,
     valueAssets,
+    parseValueKM,
     -- ** Arithmetic
     valueMinus,
     valueNegate,
@@ -56,6 +57,7 @@ module GeniusYield.Types.Value (
     assetClassToPlutus,
     assetClassFromPlutus,
     parseAssetClassWithSep,
+    parseAssetClassWithoutSep,
     parseAssetClassCore,
     -- * Token name
     GYTokenName(..),
@@ -68,7 +70,7 @@ module GeniusYield.Types.Value (
     makeAssetClass
 ) where
 
-import           Control.Lens                     ((.~), (?~))
+import           Control.Lens                     ((?~))
 import           Data.Aeson                       (object, (.=))
 import qualified Data.Aeson.Key                   as K
 import qualified Data.Aeson.KeyMap                as KM
@@ -79,6 +81,7 @@ import           GeniusYield.Imports
 import           PlutusTx.Builtins.Class          (fromBuiltin, toBuiltin)
 
 import qualified Cardano.Api                      as Api
+-- import qualified Cardano.Api.Value                as Api
 import qualified Data.Aeson                       as Aeson
 import qualified Data.Aeson.Types                 as Aeson
 import qualified Data.Attoparsec.ByteString.Char8 as Atto
@@ -96,8 +99,8 @@ import qualified Web.HttpApiData                  as Web
 
 
 import           Data.Either.Combinators          (mapLeft)
+import           Data.Foldable                    (for_)
 import           Data.Hashable                    (Hashable (..))
-import qualified GeniusYield.Imports              as TE
 import qualified GeniusYield.Types.Ada            as Ada
 import           GeniusYield.Types.Script
 
@@ -198,11 +201,16 @@ valueFromApi v = valueFromList
     ]
 
 valueFromApiTxOutValue :: Api.TxOutValue era -> GYValue
-valueFromApiTxOutValue (Api.TxOutValue _ v)                  = valueFromApi v
-valueFromApiTxOutValue (Api.TxOutAdaOnly _ (Api.Lovelace x)) = valueFromLovelace x
+valueFromApiTxOutValue (Api.TxOutValueByron (Api.Lovelace x)) = valueFromLovelace x
+valueFromApiTxOutValue (Api.TxOutValueShelleyBased e v) =
+  valueFromApi $ Api.fromLedgerValue e v
 
+-- FIXME: should we use Conway?
 valueToApiTxOutValue :: GYValue -> Api.TxOutValue Api.BabbageEra
-valueToApiTxOutValue v = Api.TxOutValue Api.MultiAssetInBabbageEra (valueToApi v)
+valueToApiTxOutValue v =
+  Api.TxOutValueShelleyBased
+    Api.ShelleyBasedEraBabbage
+    (Api.toLedgerValue Api.MaryEraOnwardsBabbage $ valueToApi v)
 
 -- | Create 'GYValue' from a list of asset class and amount.
 -- Duplicates are merged.
@@ -275,7 +283,7 @@ instance Csv.FromField GYValue where
         Nothing -> fail $ "Error Parsing GYValue: " <> show value
 
 
-assetPairToKV :: Aeson.KeyValue kv => GYAssetClass -> Integer -> kv
+assetPairToKV :: Aeson.KeyValue e kv => GYAssetClass -> Integer -> kv
 assetPairToKV ac i = K.fromText (f ac) .= i
   where
     f GYLovelace      = "lovelace"
@@ -287,14 +295,26 @@ assetPairToKV ac i = K.fromText (f ac) .= i
 -- Just (valueFromList [(GYLovelace,22),(GYToken "ff80aaaf03a273b8f5c558168dc0e2377eea810badbae6eceefc14ef" "GOLD",101)])
 --
 instance Aeson.FromJSON GYValue where  -- TODO: Do we need this? Can't this be derived from newtype?
-  parseJSON = Aeson.withObject "GYValue" $ \km ->
+  parseJSON = Aeson.withObject "GYValue" $ parseValueKM False
+
+-- | Parse a 'GYValue' from a JSON object.
+parseValueKM
+  :: Bool
+  -- ^ Attempt to try parsing without separator in asset class when parsing fails with separator.
+  -> KM.KeyMap Aeson.Value
+  -- ^ JSON object.
+  -> Aeson.Parser GYValue
+parseValueKM allowWithoutSep km =
     case KM.toList km of
         [] -> pure $ valueMake mempty
         xs -> valueFromList <$> traverse go xs
-   where
-     go :: (Aeson.Key, Aeson.Value) -> Aeson.Parser (GYAssetClass, Integer)
-     go (k, v) = do
-        ac  <- either fail pure . parseAssetClassWithSep '.' $ K.toText k
+  where
+    go :: (Aeson.Key, Aeson.Value) -> Aeson.Parser (GYAssetClass, Integer)
+    go (k, v) = do
+        let k' = K.toText k
+            parseWithSep = parseAssetClassWithSep '.' k'
+        ac  <- either fail pure $
+                 either (\(Left -> e) -> if allowWithoutSep then parseAssetClassWithoutSep k' <> e else e) Right parseWithSep
         scN <- parseJSON v
         case SC.floatingOrInteger @Double scN of
             Left d  -> fail $ "Expected amount to be an integer; amount: " <> show d
@@ -425,19 +445,17 @@ instance Aeson.ToJSONKey GYAssetClass where
 instance Aeson.FromJSONKey GYAssetClass where
     fromJSONKey = Aeson.FromJSONKeyTextParser (either (fail . show) pure . Web.parseUrlPiece)
 
+instance Swagger.ToParamSchema GYAssetClass where
+  toParamSchema _ = mempty
+                  & Swagger.type_ ?~ Swagger.SwaggerString
+
 instance Swagger.ToSchema GYAssetClass where
-  declareNamedSchema _ = do
-                           unitSchema   <- Swagger.declareSchemaRef @()     Proxy
-                           stringSchema <- Swagger.declareSchemaRef @String Proxy
-                           return $ Swagger.named "GYAssetClass" $ mempty
+  declareNamedSchema p = do
+                           return $ Swagger.named "GYAssetClass" $
+                               Swagger.paramSchemaToSchema p
                              & Swagger.type_         ?~ Swagger.SwaggerString
-                             & Swagger.description   ?~ "This is an asset class, i.e. either lovelace or some other token with its minting policy and token name."
-                             & Swagger.properties .~ [ ("GYLovelace" :: Text, unitSchema)
-                                                     , ("GYToken" :: Text, stringSchema)
-                                                     ]
-                             & Swagger.minProperties ?~ 1
-                             & Swagger.maxProperties ?~ 1
-                             & Swagger.example       ?~ toJSON ("ff80aaaf03a273b8f5c558168dc0e2377eea810badbae6eceefc14ef.GOLD" :: Text)
+                             & Swagger.description   ?~ "This is an asset class, i.e. either \"lovelace\" or some other token with its minting policy and token name delimited by dot (.)."
+                             & Swagger.example       ?~ toJSON ("ff80aaaf03a273b8f5c558168dc0e2377eea810badbae6eceefc14ef.474f4c44" :: Text)
 
 -- | Converts a 'GYAssetClass' into a Plutus 'Plutus.AssetClass'.
 assetClassToPlutus :: GYAssetClass -> Plutus.AssetClass
@@ -485,7 +503,7 @@ showAssetClass (Plutus.AssetClass (cs, tn))
         Nothing  -> error $ "invalid token name: " <> show tn
         Just tn' -> show cs <> "." <> T.unpack (tokenNameToHex tn')
 
--- | Note: not used currently by API (tests only)
+-- |
 --
 -- >>> Web.toUrlPiece GYLovelace
 -- "lovelace"
@@ -562,7 +580,7 @@ instance Csv.ToField GYAssetClass where
 -- Right (GYToken "ff80aaaf03a273b8f5c558168dc0e2377eea810badbae6eceefc14ef" "Gold")
 --
 -- >>> Csv.runParser @GYAssetClass $ Csv.parseField "not an asset class"
--- Left "Failed reading: takeWhile1"
+-- Left "not enough input"
 --
 instance Csv.FromField GYAssetClass where
     parseField = either fail return . parseAssetClassWithSep '.' . TE.decodeUtf8Lenient
@@ -583,24 +601,52 @@ instance Csv.FromField GYAssetClass where
 -- Right (GYToken "ff80aaaf03a273b8f5c558168dc0e2377eea810badbae6eceefc14ef" "")
 --
 parseAssetClassWithSep :: Char -> Text -> Either String GYAssetClass
-parseAssetClassWithSep sep = parseAssetClassCore sep $ \tn ->
-    case tokenNameFromHex (TE.decodeUtf8 tn) of
-      Left err -> fail $ T.unpack err
-      Right x  -> pure x
+parseAssetClassWithSep = parseAssetClass . Just
+
+-- |
+-- Parse hex encoded currency symbol and hex encoded token name joined together without any separator.
+-- >>> parseAssetClassWithoutSep "lovelace"
+-- Right GYLovelace
+--
+-- >>> parseAssetClassWithoutSep ""
+-- Right GYLovelace
+--
+-- >>> parseAssetClassWithoutSep "ff80aaaf03a273b8f5c558168dc0e2377eea810badbae6eceefc14ef476f6c64"
+-- Right (GYToken "ff80aaaf03a273b8f5c558168dc0e2377eea810badbae6eceefc14ef" "Gold")
+-- >>> parseAssetClassWithoutSep "ff80aaaf03a273b8f5c558168dc0e2377eea810badbae6eceefc14ef"
+-- Right (GYToken "ff80aaaf03a273b8f5c558168dc0e2377eea810badbae6eceefc14ef" "")
+--
+parseAssetClassWithoutSep :: Text -> Either String GYAssetClass
+parseAssetClassWithoutSep = parseAssetClass Nothing
+
+parseAssetClass :: Maybe Char -> Text -> Either String GYAssetClass
+parseAssetClass msep =
+    case msep of
+        Just sep -> parseAssetClassCore sep tnParser
+        Nothing  -> parseAssetClassCore' Nothing tnParser
+  where
+    tnParser tn =
+        case tokenNameFromHexBS tn of
+        Left err -> fail $ T.unpack err
+        Right x  -> pure x
 
 parseAssetClassCore :: Char -> (BS.ByteString -> Atto.Parser GYTokenName) -> Text -> Either String GYAssetClass
-parseAssetClassCore _ _ "lovelace" = pure GYLovelace
-parseAssetClassCore _ _ ""         = pure GYLovelace
-parseAssetClassCore sep tkParser t = Atto.parseOnly parser (TE.encodeUtf8 t)
+parseAssetClassCore = parseAssetClassCore' . Just
+
+parseAssetClassCore' :: Maybe Char -> (BS.ByteString -> Atto.Parser GYTokenName) -> Text -> Either String GYAssetClass
+parseAssetClassCore' _ _ "lovelace" = pure GYLovelace
+parseAssetClassCore' _ _ ""         = pure GYLovelace
+parseAssetClassCore' msep tkParser t = Atto.parseOnly parser (TE.encodeUtf8 t)
   where
     parser :: Atto.Parser GYAssetClass
     parser = do
-        cs <- Atto.takeWhile1 isHexDigit
-        _  <- Atto.char sep
-        tn <- Atto.takeWhile isAlphaNum
+        cs <- Atto.take 56
         case Api.deserialiseFromRawBytesHex Api.AsPolicyId cs of
             Left x    -> fail $ "Invalid currency symbol: " ++ show cs ++ "; Reason: " ++ show x
-            Right cs' -> GYToken (mintingPolicyIdFromApi cs') <$> tkParser tn
+            Right cs' -> do
+                for_ msep (void . Atto.char)
+                tn <- Atto.takeWhile isAlphaNum
+                GYToken (mintingPolicyIdFromApi cs') <$> tkParser tn
 
 -------------------------------------------------------------------------------
 -- TokenName
@@ -714,6 +760,9 @@ tokenNameFromApi = coerce
 
 tokenNameFromHex :: Text -> Either Text GYTokenName
 tokenNameFromHex = Web.parseUrlPiece
+
+tokenNameFromHexBS :: BS.ByteString -> Either Text GYTokenName
+tokenNameFromHexBS = Web.parseUrlPiece . TE.decodeUtf8
 
 unsafeTokenNameFromHex :: Text -> GYTokenName
 unsafeTokenNameFromHex = either (error . T.unpack) id . tokenNameFromHex

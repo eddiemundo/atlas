@@ -1,5 +1,5 @@
-{-# LANGUAGE MultiWayIf      #-}
 {-# LANGUAGE PatternSynonyms #-}
+
 {-|
 Module      : GeniusYield.Test.Utils
 Copyright   : (c) 2023 GYELD GMBH
@@ -9,57 +9,41 @@ Stability   : develop
 
 -}
 module GeniusYield.Test.Utils
-    ( Run
-    , testRun
-    , testRun'
-    , Wallet (..)
+    ( TestInfo (..)
     , Wallets (..)
-    , newWallet
-    , runWallet
-    , runWallet'
-    , walletAddress
-    , walletPubKeyHash
-    , balance
     , withBalance
     , withWalletBalancesCheck
-    , withWalletBalancesCheckSimple
-    , getBalance
-    , getBalances
-    , runWithWalletBalancesCheck
-    , waitUntilSlot
-    , waitNSlotsGYTxMonad
     , findLockedUtxosInBody
-    , utxosInBody
+    , getRefInfos
+    , findRefScriptsInBody
     , addRefScript
-    , expectInsufficientFunds
     , addRefInput
-    , fakeGold, fakeIron
+    , fakeCoin, fakeGold, fakeIron
     , afterAllSucceed
     , feesFromLovelace
     , withMaxQCTests
     , pattern (:=)
+    , module X
     ) where
 
-import qualified Cardano.Simple.Ledger.Slot as Fork
-import qualified Cardano.Simple.Ledger.Tx   as Fork
+import           Control.Monad.Except             (ExceptT, runExceptT)
 import           Control.Monad.Random
-import           Control.Monad.State
-import           Data.List                  (findIndex)
-import qualified Data.Map.Strict            as Map
-import           Data.Maybe                 (fromJust)
-import           Data.Semigroup             (Sum (..))
-import           Data.Typeable
-import           Plutus.Model               hiding (currentSlot)
-import qualified PlutusLedgerApi.V1.Value   as Plutus
-import qualified PlutusLedgerApi.V2         as Plutus2
-import qualified Test.Tasty                 as Tasty
-import qualified Test.Tasty.QuickCheck      as Tasty
-import qualified Test.Tasty.Runners         as Tasty
+import qualified Data.Map.Strict                  as Map
+import qualified Data.Text                        as T
 
+import qualified PlutusLedgerApi.V1.Value         as Plutus
+
+import qualified Test.Tasty                       as Tasty
+import qualified Test.Tasty.QuickCheck            as Tasty
+import qualified Test.Tasty.Runners               as Tasty
+
+import           GeniusYield.HTTP.Errors
 import           GeniusYield.Imports
-import           GeniusYield.Transaction
+import           GeniusYield.Test.FakeCoin
 import           GeniusYield.TxBuilder
 import           GeniusYield.Types
+
+import           GeniusYield.Test.FeeTracker      as X
 
 -------------------------------------------------------------------------------
 -- tasty tools
@@ -114,258 +98,127 @@ fakeIron = fromFakeCoin $ FakeCoin "Iron"
 -- helpers
 -------------------------------------------------------------------------------
 
-{- | Given a test name, runs the trace for every wallet, checking there weren't
-     errors.
--}
-testRun :: String -> (Wallets -> Run a) -> Tasty.TestTree
-testRun = testRun' id
-
-testRun' :: (MockConfig -> MockConfig) -> String -> (Wallets -> Run a) -> Tasty.TestTree
-testRun' updateMockConfig name run = do
-    testNoErrorsTrace v (updateMockConfig defaultBabbage) name $ do
-        ws <- evalRandT wallets pureGen
-        run ws
-  where
-    v = valueToPlutus $ valueFromLovelace 1_000_000_000_000_000 <>
-                        fakeGold                  1_000_000_000 <>
-                        fakeIron                  1_000_000_000
-
-    w = valueFromLovelace 1_000_000_000_000 <>
-        fakeGold                  1_000_000 <>
-        fakeIron                  1_000_000
-
-    wallets :: RandT StdGen Run Wallets
-    wallets = Wallets <$> newWallet "w1" w
-                      <*> newWallet "w2" w
-                      <*> newWallet "w3" w
-                      <*> newWallet "w4" w
-                      <*> newWallet "w5" w
-                      <*> newWallet "w6" w
-                      <*> newWallet "w7" w
-                      <*> newWallet "w8" w
-                      <*> newWallet "w9" w
-
+-- | General information about the test environment to help in running polymorphic tests.
+data TestInfo = TestInfo { testGoldAsset :: !GYAssetClass, testIronAsset :: !GYAssetClass, testWallets :: !Wallets }
 
 -- | Available wallets.
 data Wallets = Wallets
-    { w1 :: !Wallet
-    , w2 :: !Wallet
-    , w3 :: !Wallet
-    , w4 :: !Wallet
-    , w5 :: !Wallet
-    , w6 :: !Wallet
-    , w7 :: !Wallet
-    , w8 :: !Wallet
-    , w9 :: !Wallet
+    { w1 :: !User
+    , w2 :: !User
+    , w3 :: !User
+    , w4 :: !User
+    , w5 :: !User
+    , w6 :: !User
+    , w7 :: !User
+    , w8 :: !User
+    , w9 :: !User
     } deriving (Show, Eq, Ord)
 
--- | Given a name and an initial fund, create a testing wallet.
-newWallet :: String -> GYValue -> RandT StdGen Run Wallet
-newWallet n v = do
-    pkh  <- lift . newUser $ valueToPlutus v
-    nid  <- lift networkIdRun
-    mkp  <- lift $ getUserSignKey pkh
-    case mkp of
-        Nothing -> fail $ "error creating user with pubkey hash " <> show pkh
-        Just kp -> return $
-                       Wallet
-                        { walletPaymentSigningKey = paymentSigningKeyFromLedgerKeyPair kp
-                        , walletNetworkId         = nid
-                        , walletName              = n
-                        }
-
--- | Runs a `GYTxMonadRun` action using the given wallet.
-runWallet :: Wallet -> GYTxMonadRun a -> Run (Maybe a)
-runWallet w action = flip evalRandT pureGen $ asRandRun w action
-
--- | Version of `runWallet` that fails if `Nothing` is returned by the action.
-runWallet' :: Wallet -> GYTxMonadRun a -> Run a
-runWallet' w action = do
-    ma <- runWallet w action
-    case ma of
-        Nothing -> fail $ printf "Run wallet action returned Nothing"
-        Just a  -> return a
-
--- | Gets a GYPubKeyHash of a testing wallet.
-walletPubKeyHash :: Wallet -> GYPubKeyHash
-walletPubKeyHash = fromJust . addressToPubKeyHash . walletAddress
-
-{- | Gets the balance from anything that `HasAddress`. The usual case will be a
-     testing wallet.
--}
-balance :: HasAddress a => a -> GYTxMonadRun GYValue
-balance a = do
-    nid <- networkId
-    case addressFromPlutus nid $ toAddress a of
-        Left err   -> fail $ show err
-        Right addr -> do
-            utxos <- utxosAtAddress addr Nothing
-            return $ foldMapUTxOs utxoValue utxos
-
-{- | Computes a `GYTxMonadRun` action and returns the result and how this action
+{- | Computes a `GYTx*Monad` action and returns the result and how this action
      changed the balance of some "Address".
 -}
-withBalance :: HasAddress a => String -> a -> GYTxMonadRun b -> GYTxMonadRun (b, GYValue)
+withBalance :: GYTxQueryMonad m => String -> User -> m b -> m (b, GYValue)
 withBalance n a m = do
-    old <- balance a
+    old <- queryBalance $ userAddr a
     b   <- m
-    new <- balance a
+    new <- queryBalance $ userAddr a
     let diff = new `valueMinus` old
-    liftRun $ logInfo $ printf "%s:\nold balance: %s\nnew balance: %s\ndiff: %s" n old new diff
+    gyLogDebug' "" $ printf "%s:\nold balance: %s\nnew balance: %s\ndiff: %s" n old new diff
     return (b, diff)
 
-{- | Computes a 'GYTxMonadRun' action, checking that the 'Wallet' balances
+{- | Computes a `GYTx*Monad` action, checking that the 'Wallet' balances
         change according to the input list.
-
 Notes:
 * An empty list means no checks are performed.
 * The 'GYValue' should be negative to check if the Wallet lost those funds.
 -}
-withWalletBalancesCheck :: [(Wallet, GYValue)] -> GYTxMonadRun a -> GYTxMonadRun a
-withWalletBalancesCheck [] m            = m
+withWalletBalancesCheck :: GYTxQueryMonad m => [(User, GYValue)] -> m a -> m a
+withWalletBalancesCheck []            m = m
 withWalletBalancesCheck ((w, v) : xs) m = do
-    (b, diff) <- withBalance (walletName w) w $ withWalletBalancesCheck xs m
-    unless (diff == v) $
-        fail $ printf "expected balance difference of %s for wallet %s, but the actual difference was %s" v (walletName w) diff
+    (b, diff) <- withBalance (show $ userAddr w) w $ withWalletBalancesCheck xs m
+    unless (diff == v) $ do
+        throwAppError . someBackendError . T.pack $ printf "expected balance difference of %s for wallet %s, but the actual difference was %s" v (userAddr w) diff
     return b
-
-{- | Computes a 'GYTxMonadRun' action, checking that the 'Wallet' balances
-        change according to the input list. This is a simplified version of `withWalletBalancesCheck` where the input list need not consider lovelaces required for fees & to satisfy the min ada requirements as these are added automatically. It is therefore recommended to use this function over `withWalletBalancesCheck` to avoid hardcoding the lovelaces required for fees & min ada constraints.
-
-Notes:
-* An empty list means no checks are performed.
-* The 'GYValue' should be negative to check if the Wallet lost those funds.
--}
-withWalletBalancesCheckSimple :: [(Wallet, GYValue)] -> GYTxMonadRun a -> GYTxMonadRun a
-withWalletBalancesCheckSimple wallValueDiffs m = do
-  bs <- mapM (balance . fst) wallValueDiffs
-  a <- m
-  walletExtraLovelaceMap <- gets walletExtraLovelace
-  bs' <- mapM (balance . fst) wallValueDiffs
-
-  forM_ (zip3 wallValueDiffs bs' bs) $
-    \((w, v), b', b) ->
-      let newBalance = case Map.lookup (walletName w) walletExtraLovelaceMap of
-            Nothing -> b'
-            Just (extraLovelaceForFees, extraLovelaceForMinAda) -> b' <> valueFromLovelace (coerce $ extraLovelaceForFees <> extraLovelaceForMinAda)
-          diff = newBalance `valueMinus` b
-        in unless (diff == v) $ fail $
-            printf "Wallet: %s. Old balance: %s. New balance: %s. New balance after adding extra lovelaces %s. Expected balance difference of %s, but the actual difference was %s" (walletName w) b b' newBalance v diff
-  return a
-
--- | Given a wallet returns its balance.
-getBalance :: HasCallStack => Wallet -> Run GYValue
-getBalance w = fromJust <$> runWallet w (balance w)
-
--- | Given a list of wallets returns its balances.
-getBalances :: HasCallStack => [Wallet] -> Run [GYValue]
-getBalances = mapM getBalance
-
-{- | Computes a 'Run' action, checking that the 'Wallet' balances change according
-     to the input list.
-
-Notes:
-* An empty list means no checks are performed.
-* The 'GYValue' should be negative to check if the Wallet lost those funds.
--}
-runWithWalletBalancesCheck
-    :: HasCallStack
-    => Wallets
-    -> [(Wallets -> Wallet, GYValue)]
-    -> Run a
-    -> Run a
-runWithWalletBalancesCheck ws bsCheck m = do
-    let wsToCheck = map (($ ws) . fst) bsCheck
-
-    bs <- getBalances wsToCheck
-    a <- m
-    bs' <- getBalances wsToCheck
-
-    forM_ (zip3 bsCheck bs' bs) $
-        \((w, v), b', b) ->
-            let diff = b' `valueMinus` b
-            in unless (diff == v) $ fail $
-               printf "expected balance difference of %s for wallet %s, but the actual difference was %s"
-                      v (walletName $ w ws) diff
-    return a
-
--- | Waits N slots.
-waitNSlotsGYTxMonad :: Integer -> GYTxMonadRun ()
-waitNSlotsGYTxMonad = liftRun . waitNSlots . Fork.Slot
-
--- | Waits until a certain 'GYSlot'.
--- Fails if the given slot is greater than the current slot.
-waitUntilSlot :: GYSlot -> GYTxMonadRun ()
-waitUntilSlot slot = do
-    now <- slotOfCurrentBlock
-    let d = slotToInteger slot - slotToInteger now
-    if | d < 0     -> fail $ printf "can't wait for slot %d, because current slot is %d" (slotToInteger slot) (slotToInteger now)
-       | d == 0    -> return ()
-       | otherwise -> liftRun $ waitNSlots $ Fork.Slot d
 
 {- | Returns the list of outputs of the transaction for the given address.
      Returns Nothing if it fails to decode an address contained in the
       transaction outputs.
 -}
-findLockedUtxosInBody :: Num a => GYNetworkId -> GYAddress -> Fork.Tx -> Maybe [a]
-findLockedUtxosInBody netId addr Fork.Tx{txOutputs = os} =
+findLockedUtxosInBody :: Num a => GYAddress -> GYTx -> Maybe [a]
+findLockedUtxosInBody addr tx =
   let
-    findAllMatches (_    , []                             , acc) = Just acc
-    findAllMatches (index, Plutus2.TxOut addr' _ _ _ : os', acc) = either
-        (const Nothing)
-        (\addr'' -> if addr'' == addr
-            then findAllMatches (index + 1, os', index : acc)
-            else findAllMatches (index + 1, os', acc))
-        (addressFromPlutus netId addr')
+    os = utxosToList . txBodyUTxOs $ getTxBody tx
+    findAllMatches (_, [], acc) = Just acc
+    findAllMatches (index, txOut : os', acc) = if utxoAddress txOut == addr
+        then findAllMatches (index + 1, os', index : acc)
+        else findAllMatches (index + 1, os', acc)
   in
     findAllMatches (0, os, [])
 
--- | Given PSM transaction and the corresponding transaction id, gives the list of UTxOs generated by that body /provided they still exist/. This function is usually expected to be called immediately after the transaction's submission.
-utxosInBody :: GYTxQueryMonad m => Fork.Tx -> GYTxId -> m [Maybe GYUTxO]
-utxosInBody Fork.Tx{txOutputs = os} txId = mapM (\i -> utxoAtTxOutRef (txOutRefFromTuple (txId, fromInteger $ toInteger i))) [0 .. (length os - 1)]
+-- | Find reference scripts at given address.
+getRefInfos :: GYTxQueryMonad m => GYAddress -> m (Map (Some GYScript) GYTxOutRef)
+getRefInfos addr = do
+    utxo <- utxosAtAddress addr Nothing
+    return $ utxoToRefMap utxo
+
+utxoToRefMap :: GYUTxOs ->  Map (Some GYScript) GYTxOutRef
+utxoToRefMap utxo = Map.fromList
+    [ (sc, ref)
+    | GYUTxO { utxoRef = ref, utxoRefScript = Just sc} <- utxosToList utxo
+    ]
+
+-- | Find reference scripts in transaction body.
+findRefScriptsInBody :: GYTxBody -> Map (Some GYScript) GYTxOutRef
+findRefScriptsInBody body = do
+    let utxo = txBodyUTxOs body
+    utxoToRefMap utxo
 
 -- | Adds the given script to the given address and returns the reference for it.
-addRefScript :: GYAddress -> GYValidator 'PlutusV2 -> GYTxMonadRun (Maybe GYTxOutRef)
-addRefScript addr script = do
-    let script' = validatorToScript script
-    (Tx _ txBody, txId) <- sendSkeleton' (mustHaveOutput (mkGYTxOut addr mempty (datumFromPlutusData ())) { gyTxOutRefS = Just script' }) []
-    -- now need to find utxo at given address which has the given reference script hm...
-    let index = findIndex (\o -> Plutus2.txOutReferenceScript o == Just (scriptPlutusHash script')) (Fork.txOutputs txBody)
-    return $ (Just . txOutRefFromApiTxIdIx (txIdToApi txId) . wordToApiIx . fromInteger) . toInteger =<< index
-
--- | Expect the transaction building to fail with a 'BalancingErrorInsufficientFunds' error
-expectInsufficientFunds :: Wallet -> GYTxSkeleton v -> Run ()
-expectInsufficientFunds w skeleton = do
-    m <- runWallet w $ catchError (Nothing <$ sendSkeleton skeleton) (return . Just)
-    case m of
-        Nothing       -> error "impossible case"
-        Just Nothing  -> logError "expected transaction to fail, but it didn't"
-        Just (Just e) -> case insufficientFunds e of
-            Nothing -> logError $ "expected transaction to fail because of insufficientFunds, but it failed for another reason: " <> show e
-            Just v  -> logInfo $ printf "transaction failed as expected due to insufficient funds: %s" v
+-- Note: The new utxo is given an inline unit datum.
+addRefScript :: forall m. GYTxMonad m => GYAddress -> GYScript 'PlutusV2 -> m GYTxOutRef
+addRefScript addr sc = throwAppError absurdError `runEagerT` do
+    existingUtxos <- lift $ utxosAtAddress addr Nothing
+    let refs = utxoToRefMap existingUtxos
+    maybeToEager $ Map.lookup (Some sc) refs
+    txBody <- lift $ buildTxBody
+        $ mustHaveOutput GYTxOut
+            { gyTxOutAddress     = addr
+            , gyTxOutValue       = mempty
+            , gyTxOutDatum       = Just (unitDatum, GYTxOutUseInlineDatum)
+            , gyTxOutRefS        = Just $ GYPlutusScript sc
+            }
+    lift $ signAndSubmitConfirmed_ txBody
+    maybeToEager . Map.lookup (Some sc) $ findRefScriptsInBody txBody
   where
-    insufficientFunds :: GYTxMonadException -> Maybe GYValue
-    insufficientFunds (GYApplicationException e) = case cast e of
-        Just (BuildTxBalancingError (BalancingErrorInsufficientFunds v)) -> Just v
-        _                                                                -> Nothing
-    insufficientFunds _                          = Nothing
+    absurdError = someBackendError "Shouldn't happen: no ref in body"
 
 -- | Adds an input (whose datum we'll refer later) and returns the reference to it.
-addRefInput:: Bool       -- ^ Whether to inline this datum?
-           -> GYAddress  -- ^ Where to place this output?
-           -> GYDatum    -- ^ Our datum.
-           -> GYTxMonadRun (Maybe GYTxOutRef)
-addRefInput toInline addr dat = do
-  (Tx _ txBody, txId) <- sendSkeleton' (mustHaveOutput $ GYTxOut addr mempty (Just (dat, if toInline then GYTxOutUseInlineDatum else GYTxOutDontUseInlineDatum)) Nothing) []
-  liftRun $ logInfo $ printf "Added reference input with txId %s" txId
-  outputsWithResolvedDatums <- mapM (resolveDatumFromPlutusOutput . Plutus2.txOutDatum ) (Fork.txOutputs txBody)
-  let mIndex = findIndex (\d -> Just dat == d) outputsWithResolvedDatums
-  return $ (Just . txOutRefFromApiTxIdIx (txIdToApi txId) . wordToApiIx . fromInteger) . toInteger =<< mIndex
+addRefInput :: GYTxMonad m
+            => Bool       -- ^ Whether to inline this datum?
+            -> GYAddress  -- ^ Where to place this output?
+            -> GYDatum    -- ^ Our datum.
+            -> m GYTxOutRef
+addRefInput toInline addr dat = throwAppError absurdError `runEagerT` do
+    existingUtxos <- lift $ utxosAtAddress addr Nothing
+    maybeToEager $ findRefWithDatum existingUtxos
+    txBody <- lift . buildTxBody .
+        mustHaveOutput
+            $ GYTxOut addr mempty (Just (dat, if toInline then GYTxOutUseInlineDatum else GYTxOutDontUseInlineDatum)) Nothing
 
-resolveDatumFromPlutusOutput :: GYTxQueryMonad m => Plutus2.OutputDatum -> m (Maybe GYDatum)
-resolveDatumFromPlutusOutput (Plutus2.OutputDatum d)      = return $ Just $ datumFromPlutus d
-resolveDatumFromPlutusOutput (Plutus2.OutputDatumHash dh) = lookupDatum $ unsafeDatumHashFromPlutus dh
-resolveDatumFromPlutusOutput Plutus2.NoOutputDatum        = return Nothing
+    lift $ signAndSubmitConfirmed_ txBody
+    maybeToEager . findRefWithDatum $ txBodyUTxOs txBody
+  where
+    findRefWithDatum :: GYUTxOs -> Maybe GYTxOutRef
+    findRefWithDatum utxos = fmap utxoRef
+        . find
+            (\GYUTxO {utxoOutDatum} ->
+                case utxoOutDatum of
+                    GYOutDatumHash dh       -> hashDatum dat == dh
+                    GYOutDatumInline dat' -> dat == dat'
+                    _                       -> False
+            )
+        $ utxosToList utxos
+    absurdError = someBackendError "Shouldn't happen: no output with expected datum in body"
 
 {- | Abstraction for explicitly building a Value representing the fees of a
      transaction.
@@ -383,9 +236,20 @@ pattern (:=) x y = (x, y)
 
 infix 0 :=
 
--------------------------------------------------------------------------------
--- Preset StdGen
--------------------------------------------------------------------------------
+{- | Utilizing 'ExceptT' as a "eager monad" transformer.
 
-pureGen :: StdGen
-pureGen = mkStdGen 42
+'Left' does not indicate failure, rather it indicates that "target value has been obtained"
+and that we can exit eagerly.
+-}
+type EagerT m a = ExceptT a m ()
+
+-- | If we have a 'Just' value, we can exit with it immediately. So it gets converted
+-- to 'Left'.
+maybeToEager :: Monad m => Maybe a -> EagerT m a
+maybeToEager (Just a) = throwError a
+maybeToEager Nothing  = pure ()
+
+-- If all goes well, we should finish with a 'Left'. if not, we perform the
+-- given action to signal error.
+runEagerT :: Monad m => m a -> ExceptT a m () -> m a
+runEagerT whenError = runExceptT >=> either pure (const whenError)

@@ -1,3 +1,4 @@
+.cabal
 dist
 dist-*
 cabal-dev
@@ -25,5 +26,5 @@ cabal.project.local~
 maestro-config.json
 blockfrost-config.json
 *.skey
-.envrc
 .direnv
+.envrc

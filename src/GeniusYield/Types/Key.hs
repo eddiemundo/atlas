@@ -122,7 +122,6 @@ paymentVerificationKeyToLedger = coerce
 paymentVerificationKeyRawBytes :: GYPaymentVerificationKey -> BS8.ByteString
 paymentVerificationKeyRawBytes = Api.serialiseToRawBytes . paymentVerificationKeyToApi
 
-{-# DEPRECATED pubKeyHash "Use paymentKeyHash." #-}
 pubKeyHash :: GYPaymentVerificationKey -> GYPubKeyHash
 pubKeyHash = pubKeyHashFromApi . Api.verificationKeyHash . paymentVerificationKeyToApi
 
@@ -239,10 +238,15 @@ paymentSigningKeyFromLedgerKeyPair = coerce . TLedger.sKey
 --
 readPaymentSigningKey :: FilePath -> IO GYPaymentSigningKey
 readPaymentSigningKey fp = do
-    s <- Api.readFileTextEnvelope (Api.AsSigningKey Api.AsPaymentKey) (Api.File fp)
+    s <- Api.readFileTextEnvelopeAnyOf acceptedTypes (Api.File fp)
     case s of
         Left err -> fail (show err) --- throws IOError
         Right x  -> return (GYPaymentSigningKey x)
+  where
+    acceptedTypes =
+        [ Api.FromSomeType (Api.AsSigningKey Api.AsGenesisUTxOKey) Api.castSigningKey
+        , Api.FromSomeType (Api.AsSigningKey Api.AsPaymentKey) id
+        ]
 
 -- | Reads extended payment signing key from file
 --
@@ -544,6 +548,9 @@ generateStakeSigningKey :: IO GYStakeSigningKey
 generateStakeSigningKey = stakeSigningKeyFromApi <$> Api.generateSigningKey Api.AsStakeKey
 
 data GYSomeSigningKey = forall a. (ToShelleyWitnessSigningKey a, Show a) => GYSomeSigningKey a
+
+instance ToShelleyWitnessSigningKey GYSomeSigningKey where
+  toShelleyWitnessSigningKey (GYSomeSigningKey skey) = toShelleyWitnessSigningKey skey
 
 readSomeSigningKey :: FilePath -> IO GYSomeSigningKey
 readSomeSigningKey file = do
