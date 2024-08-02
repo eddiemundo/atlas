@@ -449,7 +449,7 @@ finalizeGYBalancedTx
     txAuxScripts :: Api.TxAuxScripts Api.BabbageEra
     txAuxScripts =
       Api.TxAuxScripts
-        Api.AuxScriptsInBabbageEra
+        Api.AllegraEraOnwardsBabbage
         [Api.ScriptInEra Api.PlutusScriptV1InBabbage
           $ Api.PlutusScript Api.PlutusScriptV1
           $ Api.S.PlutusScriptSerialised 
