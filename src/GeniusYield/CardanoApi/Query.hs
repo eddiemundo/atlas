@@ -52,9 +52,10 @@ queryAlonzoEra info q = do
 
 queryBabbageEra :: Api.LocalNodeConnectInfo -> Api.QueryInShelleyBasedEra Api.BabbageEra a -> IO a
 queryBabbageEra info q = do
+    print @String "QUERY BABBAGE ERA"
     e <- queryCardanoMode info $ Api.QueryInEra $ Api.QueryInShelleyBasedEra Api.ShelleyBasedEraBabbage q
     case e of
-        Left err -> print err >> (throwIO $ CardanoQueryException $ show err)
+        Left err -> throwIO $ CardanoQueryException $ show err
         Right x  -> return x
 
 
