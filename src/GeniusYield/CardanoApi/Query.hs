@@ -54,7 +54,7 @@ queryBabbageEra :: Api.LocalNodeConnectInfo -> Api.QueryInShelleyBasedEra Api.Ba
 queryBabbageEra info q = do
     e <- queryCardanoMode info $ Api.QueryInEra $ Api.QueryInShelleyBasedEra Api.ShelleyBasedEraBabbage q
     case e of
-        Left err -> throwIO $ CardanoQueryException $ show err
+        Left err -> print err >> (throwIO $ CardanoQueryException $ show err)
         Right x  -> return x
 
 
