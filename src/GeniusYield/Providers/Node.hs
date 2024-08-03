@@ -79,7 +79,10 @@ nodeGetParameters era info = GYGetParameters
 
 nodeGetProtocolParameters :: GYEra -> Api.LocalNodeConnectInfo -> IO Api.S.ProtocolParameters
 nodeGetProtocolParameters GYAlonzo  info = Api.fromLedgerPParams Api.ShelleyBasedEraAlonzo <$> queryAlonzoEra info Api.QueryProtocolParameters
-nodeGetProtocolParameters GYBabbage info = Api.fromLedgerPParams Api.ShelleyBasedEraBabbage <$> queryBabbageEra info Api.QueryProtocolParameters
+nodeGetProtocolParameters GYBabbage info = do
+  hi <- queryBabbageEra info Api.QueryProtocolParameters
+  print hi
+  pure $ Api.fromLedgerPParams Api.ShelleyBasedEraBabbage hi
 -- FIXME: add Conway
 
 stakePools :: GYEra -> Api.LocalNodeConnectInfo -> IO (Set.Set Api.S.PoolId)
