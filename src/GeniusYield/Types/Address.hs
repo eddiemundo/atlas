@@ -92,6 +92,7 @@ import           GeniusYield.Types.Credential         (GYPaymentCredential,
                                                        stakeCredentialFromApi,
                                                        stakeCredentialToApi,
                                                        stakeCredentialToHexText)
+import           GeniusYield.Types.Era
 import           GeniusYield.Types.Ledger
 import           GeniusYield.Types.NetworkId
 import           GeniusYield.Types.PaymentKeyHash     (GYPaymentKeyHash,
@@ -138,7 +139,7 @@ instance Hashable GYAddress where
 -- |
 --
 -- >>> addressToApi addr
--- AddressShelley (ShelleyAddress Testnet (KeyHashObj (KeyHash "e1cbb80db89e292269aeb93ec15eb963dda5176b66949fe1c2a6a38d")) (StakeRefBase (KeyHashObj (KeyHash "1b930e9f7add78a174a21000e989ff551366dcd127028cb2aa39f616"))))
+-- AddressShelley (ShelleyAddress Testnet (KeyHashObj (KeyHash {unKeyHash = "e1cbb80db89e292269aeb93ec15eb963dda5176b66949fe1c2a6a38d"})) (StakeRefBase (KeyHashObj (KeyHash {unKeyHash = "1b930e9f7add78a174a21000e989ff551366dcd127028cb2aa39f616"}))))
 -- >>> addressToApi addrByron1
 -- AddressByron (ByronAddress (Address {addrRoot = 04865e42d2373addbebd5d2acf81c760c848970142889f7ee763091b, addrAttributes = Attributes { data_ = AddrAttributes {aaVKDerivationPath = Nothing, aaNetworkMagic = NetworkMainOrStage} }, addrType = ATVerKey}))
 -- >>> addressToApi addrByron2
@@ -147,13 +148,13 @@ instance Hashable GYAddress where
 addressToApi :: GYAddress -> Api.AddressAny
 addressToApi = coerce
 
-addressToApi' :: GYAddress -> Api.AddressInEra Api.BabbageEra
-addressToApi' = coerce addrAnyToBabbageEra
+addressToApi' :: GYAddress -> Api.AddressInEra ApiEra
+addressToApi' = coerce addrAnyToConwayEra
 
 -- not exported
-addrAnyToBabbageEra :: Api.AddressAny -> Api.AddressInEra Api.BabbageEra
-addrAnyToBabbageEra (Api.AddressByron   addr) = Api.AddressInEra Api.ByronAddressInAnyEra                             addr
-addrAnyToBabbageEra (Api.AddressShelley addr) = Api.AddressInEra (Api.ShelleyAddressInEra Api.ShelleyBasedEraBabbage) addr
+addrAnyToConwayEra :: Api.AddressAny -> Api.AddressInEra ApiEra
+addrAnyToConwayEra (Api.AddressByron   addr) = Api.AddressInEra Api.ByronAddressInAnyEra                             addr
+addrAnyToConwayEra (Api.AddressShelley addr) = Api.AddressInEra (Api.ShelleyAddressInEra Api.ShelleyBasedEraConway) addr
 
 addressFromApi :: Api.AddressAny -> GYAddress
 addressFromApi = coerce
