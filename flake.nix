@@ -1,10 +1,11 @@
 {
   description = "atlas-cardano";
-  inputs.haskellNix.url = "github:input-output-hk/haskell.nix";
+  # using the newest haskell.nix breaks when building postgresql-libpq-configure 0.11
+  inputs.haskellNix.url = "github:input-output-hk/haskell.nix?rev=d0b7bc42579a187e4753e459ef77dba6a1e9629e";
   inputs.nixpkgs.follows = "haskellNix/nixpkgs-unstable";
   inputs.flake-utils.url = "github:numtide/flake-utils";
   inputs.CHaP = {
-      url = "github:input-output-hk/cardano-haskell-packages?ref=repo";
+      url = "github:intersectmbo/cardano-haskell-packages?ref=repo";
       flake = false;
     };
   outputs = { self, nixpkgs, flake-utils, haskellNix, CHaP }:
@@ -30,11 +31,11 @@
             hixProject =
               final.haskell-nix.project' {
                 src = ./.;
-                compiler-nix-name = "ghc964";
+                compiler-nix-name = "ghc96";
                 # This is used by `nix develop .` to open a shell for use with
                 # `cabal`, `hlint` and `haskell-language-server`
                 shell.tools = {
-                  cabal = {}  ;
+                  cabal = {};
                   hlint = {};
                   haskell-language-server = {};
                 };
@@ -42,7 +43,7 @@
                 shell.buildInputs = with pkgs; [
                   nixpkgs-fmt
                 ];
-                inputMap = { "https://input-output-hk.github.io/cardano-haskell-packages" = CHaP; };
+                inputMap = { "https://chap.intersectmbo.org/" = CHaP; };
               };
           })
           overlay
