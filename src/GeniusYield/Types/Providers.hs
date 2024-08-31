@@ -410,6 +410,7 @@ makeGetParameters getProtParams getSysStart getEraHist getStkPools = do
                     print @Text "using cache"
                     pure (GYParameterStore eraEndTime a, a)
                 else do
+                    print @Text "refreshing cache"
                     newEraHist <- getEraHist
                     newSlotConf <- getSlotConf newEraHist  -- Remember that this is actually a pure computation being lifted to IO here.
                     newData <- dataRefreshF newEraHist
