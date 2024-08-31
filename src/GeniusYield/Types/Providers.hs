@@ -406,7 +406,8 @@ makeGetParameters getProtParams getSysStart getEraHist getStkPools = do
             -- See note: [Caching and concurrently accessible MVars].
             modifyMVar dataRef $ \(GYParameterStore eraEndTime a) -> do
                 currTime <- getTime
-                if beforeEnd currTime eraEndTime then
+                if beforeEnd currTime eraEndTime then do
+                    print @Text "using cache"
                     pure (GYParameterStore eraEndTime a, a)
                 else do
                     newEraHist <- getEraHist
