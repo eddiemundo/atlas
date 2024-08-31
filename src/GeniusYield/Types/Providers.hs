@@ -396,7 +396,7 @@ makeGetParameters getProtParams getSysStart getEraHist getStkPools = do
     getProtParamsMVar <- newMVar (buildParam initProtParams)
     getEraHistMVar   <- newMVar (buildParam initEraHist)    
     getStkPoolsMVar  <- newMVar (buildParam initStkPools)   
-    getSlotConfMVar  <- newMVar (buildParam initSlotConf)   
+    -- getSlotConfMVar  <- newMVar (buildParam initSlotConf)   
 
     let mkMethod :: (Api.EraHistory -> IO a) -> MVar (GYParameterStore a) -> IO a
         mkMethod _dataRefreshF dataRef = do
@@ -417,7 +417,7 @@ makeGetParameters getProtParams getSysStart getEraHist getStkPools = do
     let getProtParams' =  mkMethod (const getProtParams) getProtParamsMVar
     let getEraHist'    =  mkMethod pure getEraHistMVar
     let getStkPools'   =  mkMethod (const getStkPools) getStkPoolsMVar
-    let getSlotConf'   =  mkMethod getSlotConf getSlotConfMVar
+    -- let getSlotConf'   =  mkMethod getSlotConf getSlotConfMVar
         {- | Make an efficient 'GYGetParameters' method.
         This will only refresh the data (using the provided 'dataRefreshF') if current time has passed the
         era end. It will also update the 'eraEndTime' to the new era end when necessary.
@@ -429,7 +429,7 @@ makeGetParameters getProtParams getSysStart getEraHist getStkPools = do
         , gyGetProtocolParameters' = getProtParams'
         , gyGetEraHistory' = getEraHist'
         , gyGetStakePools' = getStkPools'
-        , gyGetSlotConfig' = getSlotConf'
+        , gyGetSlotConfig' = pure initSlotConf --getSlotConf'
         }
   where
     -- beforeEnd _ Nothing               = True
