@@ -73,8 +73,8 @@ import           Control.AutoUpdate                        (UpdateSettings (..),
                                                             defaultUpdateSettings,
                                                             mkAutoUpdate)
 import           Control.Concurrent                        (threadDelay)
-import           Control.Concurrent.Class.MonadMVar.Strict (StrictMVar,
-                                                            modifyMVar, newMVar)
+-- import           Control.Concurrent.Class.MonadMVar.Strict (StrictMVar,
+--                                                             modifyMVar, newMVar)
 import           Control.Monad                             ((<$!>))
 import           Control.Monad.IO.Class                    (MonadIO (..))
 import           Data.Default                              (Default, def)
@@ -99,6 +99,7 @@ import           GeniusYield.Types.TxOutRef
 import           GeniusYield.Types.UTxO
 import           GeniusYield.Types.Value                   (GYAssetClass)
 import           GHC.Stack                                 (withFrozenCallStack)
+import Control.Concurrent.MVar (MVar, newMVar, modifyMVar)
 
 {- Note [Caching and concurrently accessible MVars]
 
@@ -335,7 +336,7 @@ makeSlotActions t getSlotOfCurrentBlock = do
         , gyWaitUntilSlot'         = gyWaitUntilSlotDefault gcs
         }
   where
-    getSlotOfCurrentBlock' :: StrictMVar IO GYSlotStore -> IO GYSlot
+    getSlotOfCurrentBlock' :: MVar GYSlotStore -> IO GYSlot
     getSlotOfCurrentBlock' var = do
         now <- getCurrentTime
         -- See note: [Caching and concurrently accessible MVars].
@@ -403,7 +404,7 @@ makeGetParameters getProtParams getSysStart getEraHist getStkPools = do
 
         If refreshing is not necessary, the data is simply returned from the storage.
         -}
-        mkMethod :: (Api.EraHistory -> IO a) -> StrictMVar IO (GYParameterStore a) -> IO a
+        mkMethod :: (Api.EraHistory -> IO a) -> MVar (GYParameterStore a) -> IO a
         mkMethod dataRefreshF dataRef = do
             -- See note: [Caching and concurrently accessible MVars].
             modifyMVar dataRef $ \(GYParameterStore eraEndTime a) -> do
