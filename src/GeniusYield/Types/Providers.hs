@@ -324,30 +324,30 @@ makeSlotActions :: NominalDiffTime
                 -- ^ Getting current slot directly from the provider
                 -> IO GYSlotActions
 makeSlotActions t getSlotOfCurrentBlock = do
-    getTime         <- mkAutoUpdate defaultUpdateSettings {updateAction = getCurrentTime}
-    slotRefetchTime <- addUTCTime t <$> getTime
+    -- getTime         <- mkAutoUpdate defaultUpdateSettings {updateAction = getCurrentTime}
+    slotRefetchTime <- addUTCTime t <$> getCurrentTime
     initSlot        <- getSlotOfCurrentBlock
     slotStoreRef    <- newMVar $ GYSlotStore slotRefetchTime initSlot
-    let gcs = getSlotOfCurrentBlock' getTime slotStoreRef
+    let gcs = getSlotOfCurrentBlock' slotStoreRef
     pure GYSlotActions
         { gyGetSlotOfCurrentBlock' = gcs
         , gyWaitForNextBlock'      = gyWaitForNextBlockDefault gcs
         , gyWaitUntilSlot'         = gyWaitUntilSlotDefault gcs
         }
   where
-    getSlotOfCurrentBlock' :: IO UTCTime -> StrictMVar IO GYSlotStore -> IO GYSlot
-    getSlotOfCurrentBlock' getTime var = do
+    getSlotOfCurrentBlock' :: StrictMVar IO GYSlotStore -> IO GYSlot
+    getSlotOfCurrentBlock' var = do
+        now <- getCurrentTime
         -- See note: [Caching and concurrently accessible MVars].
-        modifyMVar var $ \(GYSlotStore slotRefetchTime slotData) -> do
-            now <- getTime
+        modifyMVar var $ \store@(GYSlotStore slotRefetchTime slotData) -> do
             if now < slotRefetchTime then do
                 print @Text "using slot cache"
                 -- Return unmodified.
-                pure (GYSlotStore slotRefetchTime slotData, slotData)
+                pure (store, slotData)
             else do
                 print @Text "using refreshing slot cache"
                 newSlot <- getSlotOfCurrentBlock
-                newNow <- getTime
+                newNow <- getCurrentTime
                 let newSlotRefetchTime = addUTCTime t newNow
                 pure (GYSlotStore newSlotRefetchTime newSlot, newSlot)
 
