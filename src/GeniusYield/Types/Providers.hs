@@ -390,34 +390,39 @@ makeGetParameters getProtParams getSysStart getEraHist getStkPools = do
     initEraHist    <- getEraHist
     initStkPools   <- getStkPools
     initSlotConf   <- getSlotConf initEraHist
-
     let slotEndToUTCTime slotConf = posixSecondsToUTCTime . timeToPOSIX . slotToBeginTimePure slotConf . flip unsafeAdvanceSlot 1 . slotFromApi
-        buildParam :: a -> GYParameterStore a
+    let buildParam :: a -> GYParameterStore a
         buildParam     = GYParameterStore (slotEndToUTCTime initSlotConf <$!> getEraEndSlot initEraHist)
-        getProtParams' = newMVar (buildParam initProtParams) >>= mkMethod (const getProtParams)
-        getEraHist'    = newMVar (buildParam initEraHist)    >>= mkMethod pure
-        getStkPools'   = newMVar (buildParam initStkPools)   >>= mkMethod (const getStkPools)
-        getSlotConf'   = newMVar (buildParam initSlotConf)   >>= mkMethod getSlotConf
+    getProtParamsMVar <- newMVar (buildParam initProtParams)
+    getEraHistMVar   <- newMVar (buildParam initEraHist)    
+    getStkPoolsMVar  <- newMVar (buildParam initStkPools)   
+    getSlotConfMVar  <- newMVar (buildParam initSlotConf)   
+
+    let mkMethod :: (Api.EraHistory -> IO a) -> MVar (GYParameterStore a) -> IO a
+        mkMethod dataRefreshF dataRef = do
+          -- See note: [Caching and concurrently accessible MVars].
+          currTime <- getTime
+          modifyMVar dataRef $ \store@(GYParameterStore eraEndTime a) -> do
+              if beforeEnd currTime eraEndTime then do
+                  -- print @Text "using cache"
+                  pure (store, a)
+              else do
+                  -- print @Text "refreshing cache"
+                  newEraHist <- getEraHist
+                  newSlotConf <- getSlotConf newEraHist  -- Remember that this is actually a pure computation being lifted to IO here.
+                  newData <- dataRefreshF newEraHist
+                  pure (GYParameterStore (slotEndToUTCTime newSlotConf <$> getEraEndSlot newEraHist) newData, newData)
+
+    let getProtParams' =  mkMethod (const getProtParams) getProtParamsMVar
+    let getEraHist'    =  mkMethod pure getEraHistMVar
+    let getStkPools'   =  mkMethod (const getStkPools) getStkPoolsMVar
+    let getSlotConf'   =  mkMethod getSlotConf getSlotConfMVar
         {- | Make an efficient 'GYGetParameters' method.
         This will only refresh the data (using the provided 'dataRefreshF') if current time has passed the
         era end. It will also update the 'eraEndTime' to the new era end when necessary.
 
         If refreshing is not necessary, the data is simply returned from the storage.
         -}
-        mkMethod :: (Api.EraHistory -> IO a) -> MVar (GYParameterStore a) -> IO a
-        mkMethod dataRefreshF dataRef = do
-            -- See note: [Caching and concurrently accessible MVars].
-            modifyMVar dataRef $ \(GYParameterStore eraEndTime a) -> do
-                currTime <- getTime
-                if beforeEnd currTime eraEndTime then do
-                    -- print @Text "using cache"
-                    pure (GYParameterStore eraEndTime a, a)
-                else do
-                    -- print @Text "refreshing cache"
-                    newEraHist <- getEraHist
-                    newSlotConf <- getSlotConf newEraHist  -- Remember that this is actually a pure computation being lifted to IO here.
-                    newData <- dataRefreshF newEraHist
-                    pure (GYParameterStore (slotEndToUTCTime newSlotConf <$> getEraEndSlot newEraHist) newData, newData)
     pure $ GYGetParameters
         { gyGetSystemStart' = pure sysStart
         , gyGetProtocolParameters' = getProtParams'
