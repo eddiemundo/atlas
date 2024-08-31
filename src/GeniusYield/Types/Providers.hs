@@ -383,7 +383,7 @@ makeGetParameters
                 -- ^ Getting stake pools
                 -> IO GYGetParameters
 makeGetParameters getProtParams getSysStart getEraHist getStkPools = do
-    getTime        <- mkAutoUpdate defaultUpdateSettings {updateAction = getCurrentTime}
+    -- getTime        <- mkAutoUpdate defaultUpdateSettings {updateAction = getCurrentTime}
     sysStart       <- getSysStart
     let getSlotConf = makeSlotConfigIO sysStart
     initProtParams <- getProtParams
@@ -399,19 +399,20 @@ makeGetParameters getProtParams getSysStart getEraHist getStkPools = do
     getSlotConfMVar  <- newMVar (buildParam initSlotConf)   
 
     let mkMethod :: (Api.EraHistory -> IO a) -> MVar (GYParameterStore a) -> IO a
-        mkMethod dataRefreshF dataRef = do
+        mkMethod _dataRefreshF dataRef = do
           -- See note: [Caching and concurrently accessible MVars].
-          currTime <- getTime
-          modifyMVar dataRef $ \store@(GYParameterStore eraEndTime a) -> do
-              if beforeEnd currTime eraEndTime then do
-                  -- print @Text "using cache"
-                  pure (store, a)
-              else do
-                  -- print @Text "refreshing cache"
-                  newEraHist <- getEraHist
-                  newSlotConf <- getSlotConf newEraHist  -- Remember that this is actually a pure computation being lifted to IO here.
-                  newData <- dataRefreshF newEraHist
-                  pure (GYParameterStore (slotEndToUTCTime newSlotConf <$> getEraEndSlot newEraHist) newData, newData)
+          -- currTime <- getTime
+          modifyMVar dataRef $ \store@(GYParameterStore _eraEndTime a) -> do
+              pure (store, a)
+              -- if beforeEnd currTime eraEndTime then do
+              --     -- print @Text "using cache"
+              --     pure (store, a)
+              -- else do
+              --     -- print @Text "refreshing cache"
+              --     newEraHist <- getEraHist
+              --     newSlotConf <- getSlotConf newEraHist  -- Remember that this is actually a pure computation being lifted to IO here.
+              --     newData <- dataRefreshF newEraHist
+              --     pure (GYParameterStore (slotEndToUTCTime newSlotConf <$> getEraEndSlot newEraHist) newData, newData)
 
     let getProtParams' =  mkMethod (const getProtParams) getProtParamsMVar
     let getEraHist'    =  mkMethod pure getEraHistMVar
@@ -431,8 +432,8 @@ makeGetParameters getProtParams getSysStart getEraHist getStkPools = do
         , gyGetSlotConfig' = getSlotConf'
         }
   where
-    beforeEnd _ Nothing               = True
-    beforeEnd currTime (Just endTime) = currTime < endTime
+    -- beforeEnd _ Nothing               = True
+    -- beforeEnd currTime (Just endTime) = currTime < endTime
     makeSlotConfigIO sysStart = either
         (throwIO . GYConversionException . GYEraSummariesToSlotConfigError . Txt.pack)
         pure
