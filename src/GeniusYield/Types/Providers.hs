@@ -341,9 +341,11 @@ makeSlotActions t getSlotOfCurrentBlock = do
         modifyMVar var $ \(GYSlotStore slotRefetchTime slotData) -> do
             now <- getTime
             if now < slotRefetchTime then do
+                print @Text "using slot cache"
                 -- Return unmodified.
                 pure (GYSlotStore slotRefetchTime slotData, slotData)
             else do
+                print @Text "using refreshing slot cache"
                 newSlot <- getSlotOfCurrentBlock
                 newNow <- getTime
                 let newSlotRefetchTime = addUTCTime t newNow
