@@ -342,11 +342,11 @@ makeSlotActions t getSlotOfCurrentBlock = do
         -- See note: [Caching and concurrently accessible MVars].
         modifyMVar var $ \store@(GYSlotStore slotRefetchTime slotData) -> do
             if now < slotRefetchTime then do
-                print @Text "using slot cache"
+                -- print @Text "using slot cache"
                 -- Return unmodified.
                 pure (store, slotData)
             else do
-                print @Text "using refreshing slot cache"
+                -- print @Text "using refreshing slot cache"
                 newSlot <- getSlotOfCurrentBlock
                 newNow <- getCurrentTime
                 let newSlotRefetchTime = addUTCTime t newNow
@@ -410,10 +410,10 @@ makeGetParameters getProtParams getSysStart getEraHist getStkPools = do
             modifyMVar dataRef $ \(GYParameterStore eraEndTime a) -> do
                 currTime <- getTime
                 if beforeEnd currTime eraEndTime then do
-                    print @Text "using cache"
+                    -- print @Text "using cache"
                     pure (GYParameterStore eraEndTime a, a)
                 else do
-                    print @Text "refreshing cache"
+                    -- print @Text "refreshing cache"
                     newEraHist <- getEraHist
                     newSlotConf <- getSlotConf newEraHist  -- Remember that this is actually a pure computation being lifted to IO here.
                     newData <- dataRefreshF newEraHist
