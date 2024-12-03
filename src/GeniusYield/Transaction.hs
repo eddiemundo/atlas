@@ -617,7 +617,8 @@ makeTransactionBodyAutoBalanceWrapper collaterals ss eh pp _ps utxos body change
                 in fromRight (error "corrupt dummy vkey") (CBOR.decodeFull version keyBytes)
           in fromInteger $ view sizeTxF $ Shelley.addKeyWitnesses ltx (Set.fromList [WitVKey (dummyVKey x) dummySig | x <- [1 .. nkeys]])
     -- See: Cardano.Ledger.Alonzo.Rules.validateExUnitsTooBigUTxO
-    unless (steps <= maxSteps && mem <= maxMemory) $
+    let resourceUsageAsString = "Steps: " <> show steps <> ", Mem: " <> show mem <> ", TxSize: " <> show txSize
+    unless (trace resourceUsageAsString $ steps <= maxSteps && mem <= maxMemory) $
         Left $ GYBuildTxExUnitsTooBig (maxSteps, maxMemory) (steps, mem)
     -- See: Cardano.Ledger.Shelley.Rules.validateMaxTxSizeUTxO
     unless (txSize <= maxTxSize) $
