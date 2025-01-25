@@ -1,52 +1,48 @@
-{-|
+{- |
 Module      : GeniusYield.Types.TxWdrl
 Copyright   : (c) 2023 GYELD GMBH
 License     : Apache 2.0
 Maintainer  : support@geniusyield.co
 Stability   : develop
-
 -}
 module GeniusYield.Types.TxWdrl (
-    GYTxWdrl (..),
-    GYTxWdrlWitness (..),
-    txWdrlToApi,
+  GYTxWdrl (..),
+  GYTxWdrlWitness,
+  pattern GYTxWdrlWitnessKey,
+  pattern GYTxWdrlWitnessScript,
+  txWdrlToApi,
 ) where
 
+import Cardano.Api qualified as Api
+import Cardano.Ledger.Coin qualified as Ledger
+import GeniusYield.Imports (Natural)
+import GeniusYield.Types.Address (GYStakeAddress, stakeAddressToApi)
+import GeniusYield.Types.BuildScript
+import GeniusYield.Types.BuildWitness
+import GeniusYield.Types.Era
+import GeniusYield.Types.Redeemer
 
-import qualified Cardano.Api                as Api
-import           GeniusYield.Imports        (Natural)
-import           GeniusYield.Types.Address  (GYStakeAddress, stakeAddressToApi)
-import           GeniusYield.Types.Redeemer
-import           GeniusYield.Types.Script
--- | Transaction withdrawal.
---
--- The parameter @v@ indicates the minimum version of scripts allowed as withdrawals
--- in the transaction.
---
+{- | Transaction withdrawal.
+
+The parameter @v@ indicates the minimum version of scripts allowed as withdrawals
+in the transaction.
+-}
 data GYTxWdrl v = GYTxWdrl
-    { gyTxWdrlStakeAddress :: !GYStakeAddress
-    , gyTxWdrlAmount       :: !Natural
-    , gyTxWdrlWitness      :: !(GYTxWdrlWitness v)
-    }
+  { gyTxWdrlStakeAddress :: !GYStakeAddress
+  , gyTxWdrlAmount :: !Natural
+  , gyTxWdrlWitness :: !(GYTxBuildWitness v)
+  }
   deriving (Eq, Show)
 
--- | Represents witness type and associated information for tx withdrawals.
-data GYTxWdrlWitness v
-    -- | Key witness.
-    = GYTxWdrlWitnessKey
-    -- | Script witness with associated script and redeemer.
-    | GYTxWdrlWitnessScript !(GYStakeValScript v) !GYRedeemer
-    deriving stock (Eq, Show)
+type GYTxWdrlWitness v = GYTxBuildWitness v
 
-txWdrlToApi
-    :: GYTxWdrl v
-    -> (Api.StakeAddress, Api.Lovelace, Api.BuildTxWith Api.BuildTx (Api.Witness Api.WitCtxStake Api.BabbageEra))
-txWdrlToApi (GYTxWdrl stakeAddr amt wit) = (stakeAddressToApi stakeAddr, fromIntegral amt, Api.BuildTxWith $ f wit) where
-    f :: GYTxWdrlWitness v -> Api.Witness Api.WitCtxStake Api.BabbageEra
-    f GYTxWdrlWitnessKey = Api.KeyWitness Api.KeyWitnessForStakeAddr
-    f (GYTxWdrlWitnessScript v r) =
-        Api.ScriptWitness Api.ScriptWitnessForStakeAddr $
-          gyStakeValScriptWitnessToApiPlutusSW
-            v
-            (redeemerToApi r)
-            (Api.ExecutionUnits 0 0)
+pattern GYTxWdrlWitnessKey :: GYTxWdrlWitness v
+pattern GYTxWdrlWitnessKey = GYTxBuildWitnessKey
+
+pattern GYTxWdrlWitnessScript :: GYBuildPlutusScript v -> GYRedeemer -> GYTxWdrlWitness v
+pattern GYTxWdrlWitnessScript v r = GYTxBuildWitnessPlutusScript v r
+
+txWdrlToApi ::
+  GYTxWdrl v ->
+  (Api.StakeAddress, Ledger.Coin, Api.BuildTxWith Api.BuildTx (Api.Witness Api.WitCtxStake ApiEra))
+txWdrlToApi (GYTxWdrl stakeAddr amt wit) = (stakeAddressToApi stakeAddr, Ledger.Coin (toInteger amt), Api.BuildTxWith $ buildWitnessToApi wit)

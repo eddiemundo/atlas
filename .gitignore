@@ -28,3 +28,6 @@ blockfrost-config.json
 *.skey
 .direnv
 .envrc
+secrets/
+.vscode
+tests/mock-blueprints/complex-blueprint-rt.json

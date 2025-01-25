@@ -1,36 +1,142 @@
-{-|
+{- |
 Module      : GeniusYield.Types.TxCert
 Copyright   : (c) 2023 GYELD GMBH
 License     : Apache 2.0
 Maintainer  : support@geniusyield.co
 Stability   : develop
-
 -}
 module GeniusYield.Types.TxCert (
-    GYTxCert,
-    GYTxCertWitness (..),
-    txCertToApi,
-    mkStakeAddressRegistrationCertificate,
-    mkStakeAddressDeregistrationCertificate,
-    mkStakeAddressPoolDelegationCertificate,
+  GYTxCert,
+  GYTxCertWitness,
+  pattern GYTxCertWitnessKey,
+  pattern GYTxCertWitnessScript,
+  txCertToApi,
+  mkStakeAddressRegistrationCertificate,
+  mkStakeAddressDeregistrationCertificate,
+  mkStakeAddressDelegationCertificate,
+  mkStakeAddressCombinedRegistrationAndDelegationCertificate,
+  mkDRepRegistrationCertificate,
+  mkDRepUpdateCertificate,
+  mkDRepUnregistrationCertificate,
+  mkStakePoolRegistrationCertificate,
+  mkStakePoolRetirementCertificate,
+  mkCommitteeHotKeyAuthCertificate,
+  mkCommitteeColdKeyResignationCertificate,
 ) where
 
-import           GeniusYield.Types.Certificate
-import           GeniusYield.Types.Credential      (GYStakeCredential)
-import           GeniusYield.Types.StakePoolId
-import           GeniusYield.Types.TxCert.Internal
+import GeniusYield.Imports (Natural)
+import GeniusYield.Types.Anchor (GYAnchor)
+import GeniusYield.Types.BuildWitness
+import GeniusYield.Types.Certificate
+import GeniusYield.Types.Credential (GYCredential, GYStakeCredential)
+import GeniusYield.Types.Delegatee (GYDelegatee)
+import GeniusYield.Types.Epoch
+import GeniusYield.Types.KeyHash
+import GeniusYield.Types.KeyRole (GYKeyRole (..))
+import GeniusYield.Types.Pool
+import GeniusYield.Types.TxCert.Internal
 
-mkStakeAddressRegistrationCertificate :: GYStakeCredential -> GYTxCert v
-mkStakeAddressRegistrationCertificate sc = GYTxCert (GYStakeAddressRegistrationCertificate sc) Nothing
+-- | Post conway, newer stake address registration certificate also require a witness.
+mkStakeAddressRegistrationCertificate :: GYStakeCredential -> GYTxBuildWitness v -> GYTxCert v
+mkStakeAddressRegistrationCertificate sc wit = GYTxCert (GYStakeAddressRegistrationCertificatePB sc) (Just wit)
 
-{-| Note that deregistration certificate requires following preconditions:
+{- | Note that deregistration certificate requires following preconditions:
 
 1. The stake address must be registered.
 
 2. The corresponding rewards balance is zero.
 -}
-mkStakeAddressDeregistrationCertificate :: GYStakeCredential -> GYTxCertWitness v -> GYTxCert v
-mkStakeAddressDeregistrationCertificate sc wit = GYTxCert (GYStakeAddressDeregistrationCertificate sc) (Just wit)
+mkStakeAddressDeregistrationCertificate :: GYStakeCredential -> GYTxBuildWitness v -> GYTxCert v
+mkStakeAddressDeregistrationCertificate sc wit = GYTxCert (GYStakeAddressDeregistrationCertificatePB sc) (Just wit)
 
-mkStakeAddressPoolDelegationCertificate :: GYStakeCredential -> GYStakePoolId -> GYTxCertWitness v -> GYTxCert v
-mkStakeAddressPoolDelegationCertificate sc spId wit = GYTxCert (GYStakeAddressPoolDelegationCertificate sc spId) (Just wit)
+mkStakeAddressDelegationCertificate :: GYStakeCredential -> GYDelegatee -> GYTxBuildWitness v -> GYTxCert v
+mkStakeAddressDelegationCertificate sc del wit = GYTxCert (GYStakeAddressDelegationCertificatePB sc del) (Just wit)
+
+-- | Rules for combined registration and delegation certificate are same as for individual registration and delegation certificates.
+mkStakeAddressCombinedRegistrationAndDelegationCertificate :: GYStakeCredential -> GYDelegatee -> GYTxBuildWitness v -> GYTxCert v
+mkStakeAddressCombinedRegistrationAndDelegationCertificate sc del wit = GYTxCert (GYStakeAddressRegistrationDelegationCertificatePB sc del) (Just wit)
+
+{- | Note that delegation certificate requires following preconditions:
+
+1. DRep must not already be registered.
+
+2. Deposit amount should be that given by corresponding protocol parameter.
+
+3. Signature from the corresponding DRep key.
+-}
+mkDRepRegistrationCertificate :: GYCredential 'GYKeyRoleDRep -> Maybe GYAnchor -> GYTxBuildWitness v -> GYTxCert v
+mkDRepRegistrationCertificate cred anchor wit = GYTxCert (GYDRepRegistrationCertificatePB cred anchor) (Just wit)
+
+{- | Note that update certificate requires following preconditions:
+
+1. DRep must already be registered.
+
+2. Signature from the corresponding DRep key.
+-}
+mkDRepUpdateCertificate :: GYCredential 'GYKeyRoleDRep -> Maybe GYAnchor -> GYTxBuildWitness v -> GYTxCert v
+mkDRepUpdateCertificate cred anchor wit = GYTxCert (GYDRepUpdateCertificatePB cred anchor) (Just wit)
+
+{- | Note that unregistration certificate requires following preconditions:
+
+1. DRep must already be registered.
+
+2. Refund amount should be same as the deposit made by DRep while registration.
+
+3. Signature from the corresponding DRep key.
+-}
+mkDRepUnregistrationCertificate :: GYCredential 'GYKeyRoleDRep -> Natural -> GYTxBuildWitness v -> GYTxCert v
+mkDRepUnregistrationCertificate cred refund wit = GYTxCert (GYDRepUnregistrationCertificatePB cred refund) (Just wit)
+
+{- | Note that stake pool registration certificate requires following preconditions:
+
+1. @poolCost@ must be more than minimum pool cost specified in protocol parameters.
+
+2. Signature from the key corresponding to @poolId@.
+
+3. If registering for the first time, then deposit is also deducted to that given by corresponding protocol parameter (ppPoolDepositL).
+
+4. Signature from pool owners.
+-}
+mkStakePoolRegistrationCertificate ::
+  GYPoolParams ->
+  GYTxCert v
+mkStakePoolRegistrationCertificate pp = GYTxCert (GYStakePoolRegistrationCertificatePB pp) (Just GYTxBuildWitnessKey)
+
+{- | Note that stake pool retirement certificate requires following preconditions:
+
+1. Signature from the key corresponding to @poolId@.
+
+2. Epoch must be greater than the current epoch and less than or equal to ppEMax after the current epoch.
+
+3. The pool must be registered.
+
+Note that deposit made earlier is returned at epoch transition.
+-}
+mkStakePoolRetirementCertificate :: GYKeyHash 'GYKeyRoleStakePool -> GYEpochNo -> GYTxCert v
+mkStakePoolRetirementCertificate poolId epoch = GYTxCert (GYStakePoolRetirementCertificatePB poolId epoch) (Just GYTxBuildWitnessKey)
+
+{- | Note that committee hot key auth certificate requires following preconditions:
+
+1. Cold key must not have resigned from the committee.
+
+2. Should be part of current committee or future committee as dictated by a governance action.
+
+3. Signature from the corresponding cold committee key.
+-}
+mkCommitteeHotKeyAuthCertificate :: GYCredential 'GYKeyRoleColdCommittee -> GYCredential 'GYKeyRoleHotCommittee -> GYTxCert v
+mkCommitteeHotKeyAuthCertificate cold hot = GYTxCert (GYCommitteeHotKeyAuthCertificatePB cold hot) (Just GYTxBuildWitnessKey)
+
+{- | Note that committee cold key resignation certificate requires following preconditions:
+
+1. Cold key must not have resigned from the committee.
+
+2. Should be part of current committee or future committee as dictated by a governance action.
+
+3. Signature from the corresponding cold committee key.
+-}
+mkCommitteeColdKeyResignationCertificate ::
+  GYCredential 'GYKeyRoleColdCommittee ->
+  -- | Potential explanation for resignation.
+  Maybe GYAnchor ->
+  GYTxCert v
+mkCommitteeColdKeyResignationCertificate cold anchor = GYTxCert (GYCommitteeColdKeyResignationCertificatePB cold anchor) (Just GYTxBuildWitnessKey)

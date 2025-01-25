@@ -1,59 +1,159 @@
-{-|
+{- |
 Module      : GeniusYield.Types.Certificate
 Copyright   : (c) 2023 GYELD GMBH
 License     : Apache 2.0
 Maintainer  : support@geniusyield.co
 Stability   : develop
-
 -}
 module GeniusYield.Types.Certificate (
+  GYCertificatePreBuild (..),
   GYCertificate (..),
+  finaliseCert,
   certificateToApi,
   certificateFromApiMaybe,
   certificateToStakeCredential,
 ) where
 
-import qualified Cardano.Api                   as Api
-import qualified Cardano.Api.Address           as Api
-import qualified Cardano.Api.Keys.Shelley      as Api.S
-import qualified Cardano.Api.ReexposeLedger    as Ledger
-import           GeniusYield.Types.Credential  (GYStakeCredential,
-                                                stakeCredentialFromApi,
-                                                stakeCredentialToApi)
-import           GeniusYield.Types.StakePoolId
+import Cardano.Api qualified as Api
+import Cardano.Api.ReexposeLedger qualified as Ledger
+import Cardano.Ledger.Api qualified as Ledger
+import Cardano.Ledger.Conway.Core qualified as Ledger
+import Cardano.Ledger.Keys qualified as Ledger
+import Control.Lens ((^.))
+import GHC.Natural (Natural)
+import GeniusYield.Imports ((&))
+import GeniusYield.Types.Anchor
+import GeniusYield.Types.Credential (
+  GYCredential (GYCredentialByKey),
+  GYStakeCredential,
+  credentialFromLedger,
+  credentialToLedger,
+  stakeCredentialFromLedger,
+  stakeCredentialToApi,
+ )
+import GeniusYield.Types.Delegatee (
+  GYDelegatee,
+  delegateeFromLedger,
+  delegateeToLedger,
+ )
+import GeniusYield.Types.Epoch (GYEpochNo, epochNoFromLedger, epochNoToLedger)
+import GeniusYield.Types.Era
+import GeniusYield.Types.KeyHash
+import GeniusYield.Types.KeyRole
+import GeniusYield.Types.Pool (GYPoolParams (..), poolParamsFromLedger, poolParamsToLedger)
+import GeniusYield.Types.ProtocolParameters (ApiProtocolParameters)
 
-data GYCertificate =
-    GYStakeAddressRegistrationCertificate !GYStakeCredential
-  | GYStakeAddressDeregistrationCertificate !GYStakeCredential
-  | GYStakeAddressPoolDelegationCertificate !GYStakeCredential !GYStakePoolId
-  deriving stock (Eq, Show)
+-- | Certificate state before building the transaction.
+data GYCertificatePreBuild
+  = GYStakeAddressRegistrationCertificatePB !GYStakeCredential
+  | GYStakeAddressDeregistrationCertificatePB !GYStakeCredential
+  | GYStakeAddressDelegationCertificatePB !GYStakeCredential !GYDelegatee
+  | GYStakeAddressRegistrationDelegationCertificatePB !GYStakeCredential !GYDelegatee
+  | GYDRepRegistrationCertificatePB !(GYCredential 'GYKeyRoleDRep) !(Maybe GYAnchor)
+  | GYDRepUpdateCertificatePB !(GYCredential 'GYKeyRoleDRep) !(Maybe GYAnchor)
+  | GYDRepUnregistrationCertificatePB !(GYCredential 'GYKeyRoleDRep) !Natural
+  | GYStakePoolRegistrationCertificatePB !GYPoolParams
+  | GYStakePoolRetirementCertificatePB !(GYKeyHash 'GYKeyRoleStakePool) !GYEpochNo
+  | GYCommitteeHotKeyAuthCertificatePB !(GYCredential 'GYKeyRoleColdCommittee) !(GYCredential 'GYKeyRoleHotCommittee)
+  | GYCommitteeColdKeyResignationCertificatePB !(GYCredential 'GYKeyRoleColdCommittee) !(Maybe GYAnchor)
+  deriving stock (Eq, Ord, Show)
 
-certificateToApi :: GYCertificate -> Api.Certificate Api.BabbageEra
+-- | Certificate state after populating missing entries from `GYCertificatePreBuild`.
+data GYCertificate
+  = GYStakeAddressRegistrationCertificate !Natural !GYStakeCredential
+  | GYStakeAddressDeregistrationCertificate !Natural !GYStakeCredential
+  | GYStakeAddressDelegationCertificate !GYStakeCredential !GYDelegatee
+  | GYStakeAddressRegistrationDelegationCertificate !Natural !GYStakeCredential !GYDelegatee
+  | GYDRepRegistrationCertificate !Natural !(GYCredential 'GYKeyRoleDRep) !(Maybe GYAnchor)
+  | GYDRepUpdateCertificate !(GYCredential 'GYKeyRoleDRep) !(Maybe GYAnchor)
+  | GYDRepUnregistrationCertificate !(GYCredential 'GYKeyRoleDRep) !Natural
+  | GYStakePoolRegistrationCertificate !GYPoolParams
+  | GYStakePoolRetirementCertificate !(GYKeyHash 'GYKeyRoleStakePool) !GYEpochNo
+  | GYCommitteeHotKeyAuthCertificate !(GYCredential 'GYKeyRoleColdCommittee) !(GYCredential 'GYKeyRoleHotCommittee)
+  | GYCommitteeColdKeyResignationCertificate !(GYCredential 'GYKeyRoleColdCommittee) !(Maybe GYAnchor)
+  deriving stock (Eq, Ord, Show)
+
+-- FIXME: Stake address unregistration should make use of deposit that was actually used when registering earlier.
+finaliseCert :: ApiProtocolParameters -> GYCertificatePreBuild -> GYCertificate
+finaliseCert pp = \case
+  GYStakeAddressRegistrationCertificatePB sc -> GYStakeAddressRegistrationCertificate ppDep' sc
+  GYStakeAddressDeregistrationCertificatePB sc -> GYStakeAddressDeregistrationCertificate ppDep' sc
+  GYStakeAddressDelegationCertificatePB sc del -> GYStakeAddressDelegationCertificate sc del
+  GYStakeAddressRegistrationDelegationCertificatePB sc del -> GYStakeAddressRegistrationDelegationCertificate ppDep' sc del
+  GYDRepRegistrationCertificatePB cred manchor -> GYDRepRegistrationCertificate ppDRepDeposit' cred manchor
+  GYDRepUpdateCertificatePB cred manchor -> GYDRepUpdateCertificate cred manchor
+  GYDRepUnregistrationCertificatePB cred dep -> GYDRepUnregistrationCertificate cred dep
+  GYStakePoolRegistrationCertificatePB poolParams -> GYStakePoolRegistrationCertificate poolParams
+  GYStakePoolRetirementCertificatePB poolId epoch -> GYStakePoolRetirementCertificate poolId epoch
+  GYCommitteeHotKeyAuthCertificatePB cold hot -> GYCommitteeHotKeyAuthCertificate cold hot
+  GYCommitteeColdKeyResignationCertificatePB cold manchor -> GYCommitteeColdKeyResignationCertificate cold manchor
+ where
+  Ledger.Coin ppDep = pp ^. Ledger.ppKeyDepositL
+  ppDep' :: Natural = fromIntegral ppDep
+  Ledger.Coin ppDRepDeposit = pp ^. Ledger.ppDRepDepositL
+  ppDRepDeposit' :: Natural = fromIntegral ppDRepDeposit
+
+certificateToApi :: GYCertificate -> Api.Certificate ApiEra
 certificateToApi = \case
-  GYStakeAddressRegistrationCertificate sc -> Api.makeStakeAddressRegistrationCertificate
-    . Api.StakeAddrRegistrationPreConway Api.ShelleyToBabbageEraBabbage $ f sc
-  GYStakeAddressDeregistrationCertificate sc -> Api.makeStakeAddressUnregistrationCertificate
-    . Api.StakeAddrRegistrationPreConway Api.ShelleyToBabbageEraBabbage $ f sc
-  GYStakeAddressPoolDelegationCertificate sc spId -> Api.makeStakeAddressDelegationCertificate
-    . Api.StakeDelegationRequirementsPreConway Api.ShelleyToBabbageEraBabbage (f sc) $ g spId
-  where
-    f = stakeCredentialToApi
-    g = stakePoolIdToApi
+  GYStakeAddressRegistrationCertificate dep sc ->
+    Api.makeStakeAddressRegistrationCertificate
+      . Api.StakeAddrRegistrationConway Api.ConwayEraOnwardsConway (fromIntegral dep)
+      $ f sc
+  GYStakeAddressDeregistrationCertificate ref sc ->
+    Api.makeStakeAddressUnregistrationCertificate
+      . Api.StakeAddrRegistrationConway Api.ConwayEraOnwardsConway (fromIntegral ref)
+      $ f sc
+  GYStakeAddressDelegationCertificate sc del ->
+    Api.makeStakeAddressDelegationCertificate $
+      Api.StakeDelegationRequirementsConwayOnwards Api.ConwayEraOnwardsConway (f sc) (g del)
+  GYStakeAddressRegistrationDelegationCertificate dep sc del -> Api.makeStakeAddressAndDRepDelegationCertificate Api.ConwayEraOnwardsConway (f sc) (g del) (fromIntegral dep)
+  GYDRepRegistrationCertificate dep cred manchor -> Api.makeDrepRegistrationCertificate (Api.DRepRegistrationRequirements Api.ConwayEraOnwardsConway (credentialToLedger cred) (fromIntegral dep)) (anchorToLedger <$> manchor)
+  GYDRepUpdateCertificate cred manchor -> Api.makeDrepUpdateCertificate (Api.DRepUpdateRequirements Api.ConwayEraOnwardsConway (credentialToLedger cred)) (anchorToLedger <$> manchor)
+  GYDRepUnregistrationCertificate cred refund -> Api.makeDrepUnregistrationCertificate (Api.DRepUnregistrationRequirements Api.ConwayEraOnwardsConway (credentialToLedger cred) (fromIntegral refund))
+  GYStakePoolRegistrationCertificate poolParams -> Api.makeStakePoolRegistrationCertificate (Api.StakePoolRegistrationRequirementsConwayOnwards Api.ConwayEraOnwardsConway (poolParamsToLedger poolParams))
+  GYStakePoolRetirementCertificate poolId epoch -> Api.makeStakePoolRetirementCertificate (Api.StakePoolRetirementRequirementsConwayOnwards Api.ConwayEraOnwardsConway (keyHashToApi poolId) (epochNoToLedger epoch))
+  GYCommitteeHotKeyAuthCertificate cold hot -> Api.makeCommitteeHotKeyAuthorizationCertificate (Api.CommitteeHotKeyAuthorizationRequirements Api.ConwayEraOnwardsConway (credentialToLedger cold) (credentialToLedger hot))
+  GYCommitteeColdKeyResignationCertificate cold manchor -> Api.makeCommitteeColdkeyResignationCertificate (Api.CommitteeColdkeyResignationRequirements Api.ConwayEraOnwardsConway (credentialToLedger cold) (anchorToLedger <$> manchor))
+ where
+  f = stakeCredentialToApi
+  g = delegateeToLedger
 
-certificateFromApiMaybe :: Api.Certificate Api.BabbageEra -> Maybe GYCertificate
-certificateFromApiMaybe (Api.ShelleyRelatedCertificate _ x) = case x of
-  Ledger.RegTxCert (Api.fromShelleyStakeCredential -> sc) -> Just $ GYStakeAddressRegistrationCertificate (f sc)
-  Ledger.UnRegTxCert (Api.fromShelleyStakeCredential -> sc) -> Just $ GYStakeAddressDeregistrationCertificate (f sc)
-  Ledger.DelegStakeTxCert (Api.fromShelleyStakeCredential -> sc) (Api.S.StakePoolKeyHash -> spId) -> Just $ GYStakeAddressPoolDelegationCertificate (f sc) (g spId)
-  _ -> Nothing
-  where
-    f = stakeCredentialFromApi
-    g = stakePoolIdFromApi
--- TODO: Conway support.
+certificateFromApiMaybe :: Api.Certificate ApiEra -> Maybe GYCertificate
+certificateFromApiMaybe (Api.ConwayCertificate _ x) = case x of
+  Ledger.ConwayTxCertDeleg delCert -> case delCert of
+    Ledger.ConwayRegCert sc (Ledger.SJust dep) -> Just $ GYStakeAddressRegistrationCertificate (fromIntegral dep) (f sc)
+    Ledger.ConwayRegCert _ Ledger.SNothing -> Nothing
+    Ledger.ConwayUnRegCert sc (Ledger.SJust ref) -> Just $ GYStakeAddressDeregistrationCertificate (fromIntegral ref) (f sc)
+    Ledger.ConwayUnRegCert _ Ledger.SNothing -> Nothing
+    Ledger.ConwayDelegCert sc del -> Just $ GYStakeAddressDelegationCertificate (f sc) (g del)
+    Ledger.ConwayRegDelegCert sc del dep -> Just $ GYStakeAddressRegistrationDelegationCertificate (fromIntegral dep) (f sc) (g del)
+  Ledger.ConwayTxCertGov govCert -> case govCert of
+    Ledger.ConwayRegDRep cred dep manchor -> Just $ GYDRepRegistrationCertificate (fromIntegral dep) (credentialFromLedger cred) (Ledger.strictMaybeToMaybe (anchorFromLedger <$> manchor))
+    Ledger.ConwayUpdateDRep cred manchor -> Just $ GYDRepUpdateCertificate (credentialFromLedger cred) (Ledger.strictMaybeToMaybe (anchorFromLedger <$> manchor))
+    Ledger.ConwayUnRegDRep cred refund -> Just $ GYDRepUnregistrationCertificate (credentialFromLedger cred) (fromIntegral refund)
+    Ledger.ConwayAuthCommitteeHotKey cold hot -> Just $ GYCommitteeHotKeyAuthCertificate (credentialFromLedger cold) (credentialFromLedger hot)
+    Ledger.ConwayResignCommitteeColdKey cold manchor -> Just $ GYCommitteeColdKeyResignationCertificate (credentialFromLedger cold) (Ledger.strictMaybeToMaybe (anchorFromLedger <$> manchor))
+  Ledger.ConwayTxCertPool poolCert -> case poolCert of
+    Ledger.RegPool poolParams -> Just $ GYStakePoolRegistrationCertificate (poolParamsFromLedger poolParams)
+    Ledger.RetirePool poolId epoch -> Just $ GYStakePoolRetirementCertificate (keyHashFromLedger poolId) (epochNoFromLedger epoch)
+ where
+  f = stakeCredentialFromLedger
+  g = delegateeFromLedger
 certificateFromApiMaybe _ = Nothing
 
+-- | This casts relevant credentials to stake credentials as that's how cardano-api treats these under the hood, which is nonetheless ugly.
 certificateToStakeCredential :: GYCertificate -> GYStakeCredential
 certificateToStakeCredential = \case
-  GYStakeAddressRegistrationCertificate sc -> sc
-  GYStakeAddressDeregistrationCertificate sc -> sc
-  GYStakeAddressPoolDelegationCertificate sc _ -> sc
+  GYStakeAddressRegistrationCertificate _ sc -> sc
+  GYStakeAddressDeregistrationCertificate _ sc -> sc
+  GYStakeAddressDelegationCertificate sc _ -> sc
+  GYStakeAddressRegistrationDelegationCertificate _ sc _ -> sc
+  GYDRepRegistrationCertificate _ cred _ -> castCred cred
+  GYDRepUpdateCertificate cred _ -> castCred cred
+  GYDRepUnregistrationCertificate cred _ -> castCred cred
+  GYStakePoolRegistrationCertificate GYPoolParams {poolId} -> castCred $ GYCredentialByKey poolId
+  GYStakePoolRetirementCertificate poolId _ -> castCred $ GYCredentialByKey poolId
+  GYCommitteeHotKeyAuthCertificate cold _ -> castCred cold
+  GYCommitteeColdKeyResignationCertificate cold _ -> castCred cold
+ where
+  castCred cred = credentialToLedger cred & Ledger.coerceKeyRole & credentialFromLedger

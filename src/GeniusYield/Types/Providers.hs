@@ -1,97 +1,116 @@
-{-|
+{- |
 Module      : GeniusYield.Types.Providers
 Copyright   : (c) 2023 GYELD GMBH
 License     : Apache 2.0
 Maintainer  : support@geniusyield.co
 Stability   : develop
 -}
-module GeniusYield.Types.Providers
-    ( -- * Lookup Datum
-      GYLookupDatum
-      -- * Submit Tx
-    , GYSubmitTx
-      -- * Await Tx Confirmed
-    , GYAwaitTx
-    , GYAwaitTxParameters (..)
-    , GYAwaitTxException (..)
-      -- * Get current slot
-    , GYSlotActions (..)
-    , gyGetSlotOfCurrentBlock
-    , gyWaitForNextBlock
-    , gyWaitForNextBlock_
-    , gyWaitForNextBlockDefault
-    , gyWaitUntilSlot
-    , gyWaitUntilSlotDefault
-    , makeSlotActions
-      -- * Get network parameters
-    , GYGetParameters (..)
-    , gyGetProtocolParameters
-    , gyGetSystemStart
-    , gyGetEraHistory
-    , gyGetStakePools
-    , gyGetSlotConfig
-    , makeGetParameters
-      -- * Query UTxO
-    , gyQueryUtxosAtAddressWithDatumsDefault
-    , gyQueryUtxosAtAddressesWithDatumsDefault
-    , gyQueryUtxosAtPaymentCredsWithDatumsDefault
-    , gyQueryUtxosAtPaymentCredWithDatumsDefault
-    , gyQueryUtxosAtTxOutRefsWithDatumsDefault
-    , GYQueryUTxO (..)
-    , gyQueryUtxosAtAddresses
-    , gyQueryUtxosAtAddressWithDatums
-    , gyQueryUtxosAtAddressesWithDatums
-    , gyQueryUtxosAtPaymentCredWithDatums
-    , gyQueryUtxosAtPaymentCredsWithDatums
-    , gyQueryUtxosAtAddress
-    , gyQueryUtxosAtPaymentCredential
-    , gyQueryUtxosAtPaymentCredentials
-    , gyQueryUtxosAtTxOutRefs
-    , gyQueryUtxosAtTxOutRefsWithDatums
-    , gyQueryUtxoAtTxOutRef
-    , gyQueryUtxoRefsAtAddress
-    , gyQueryUtxoRefsAtAddressDefault
-    , gyQueryUtxoAtAddressesDefault
-    , gyQueryUtxoAtPaymentCredentialsDefault
-    , gyQueryUtxosAtTxOutRefsDefault
-      -- * Logging
-    , gyLog
-    , gyLogDebug
-    , gyLogInfo
-    , gyLogWarning
-    , gyLogError
-    , noLogging
-    , simpleLogging
-      -- * Providers
-    , GYProviders (..)
-    ) where
+module GeniusYield.Types.Providers (
+  -- * Lookup Datum
+  GYLookupDatum,
 
-import qualified Cardano.Api                        as Api
-import qualified Cardano.Api.Shelley                as Api.S
-import           Cardano.Slotting.Time              (SystemStart)
-import           Control.Concurrent                 (MVar, modifyMVar, newMVar,
-                                                     threadDelay)
-import           Control.Monad                      ((<$!>))
-import           Control.Monad.IO.Class             (MonadIO (..))
-import           Data.Default                       (Default, def)
-import qualified Data.Text                          as Txt
-import           Data.Time
-import           Data.Word                          (Word64)
-import           GeniusYield.CardanoApi.EraHistory  (getEraEndSlot)
-import           GeniusYield.Imports
-import           GeniusYield.TxBuilder.Errors
-import           GeniusYield.Types.Address
-import           GeniusYield.Types.Credential       (GYPaymentCredential)
-import           GeniusYield.Types.Datum
-import           GeniusYield.Types.Logging
-import           GeniusYield.Types.Slot
-import           GeniusYield.Types.SlotConfig
-import           GeniusYield.Types.StakeAddressInfo (GYStakeAddressInfo)
-import           GeniusYield.Types.Tx
-import           GeniusYield.Types.TxOutRef
-import           GeniusYield.Types.UTxO
-import           GeniusYield.Types.Value            (GYAssetClass)
-import           GHC.Stack                          (withFrozenCallStack)
+  -- * Submit Tx
+  GYSubmitTx,
+
+  -- * Await Tx Confirmed
+  GYAwaitTx,
+  GYAwaitTxParameters (..),
+  GYAwaitTxException (..),
+
+  -- * Get current slot
+  GYSlotActions (..),
+  gyGetSlotOfCurrentBlock,
+  gyWaitForNextBlock,
+  gyWaitForNextBlock_,
+  gyWaitForNextBlockDefault,
+  gyWaitUntilSlot,
+  gyWaitUntilSlotDefault,
+  makeSlotActions,
+
+  -- * Get network parameters
+  GYGetParameters (..),
+  gyGetProtocolParameters,
+  gyGetSystemStart,
+  gyGetEraHistory,
+  gyGetSlotConfig,
+  makeGetParameters,
+
+  -- * Query UTxO
+  gyQueryUtxosAtAddressWithDatumsDefault,
+  gyQueryUtxosAtAddressesWithDatumsDefault,
+  gyQueryUtxosAtPaymentCredsWithDatumsDefault,
+  gyQueryUtxosAtPaymentCredWithDatumsDefault,
+  gyQueryUtxosAtTxOutRefsWithDatumsDefault,
+  GYQueryUTxO (..),
+  gyQueryUtxosAtAddresses,
+  gyQueryUtxosAtAddressWithDatums,
+  gyQueryUtxosAtAddressesWithDatums,
+  gyQueryUtxosAtPaymentCredWithDatums,
+  gyQueryUtxosAtPaymentCredsWithDatums,
+  gyQueryUtxosAtAddress,
+  gyQueryUtxosAtPaymentCredential,
+  gyQueryUtxosAtPaymentCredentials,
+  gyQueryUtxosAtTxOutRefs,
+  gyQueryUtxosAtTxOutRefsWithDatums,
+  gyQueryUtxoAtTxOutRef,
+  gyQueryUtxoRefsAtAddress,
+  gyQueryUtxoRefsAtAddressDefault,
+  gyQueryUtxoAtAddressesDefault,
+  gyQueryUtxoAtPaymentCredentialsDefault,
+  gyQueryUtxosAtTxOutRefsDefault,
+
+  -- * Logging
+  gyLog,
+  gyLogDebug,
+  gyLogInfo,
+  gyLogWarning,
+  gyLogError,
+  noLogging,
+  simpleLogging,
+
+  -- * Providers
+  GYProviders (..),
+) where
+
+import Cardano.Api qualified as Api
+import Cardano.Api.Shelley qualified as Api.S
+import Cardano.Slotting.Time (SystemStart)
+import Control.AutoUpdate (
+  UpdateSettings (..),
+  defaultUpdateSettings,
+  mkAutoUpdate,
+ )
+import Control.Concurrent (threadDelay)
+import Control.Concurrent.Class.MonadMVar.Strict (
+  StrictMVar,
+  modifyMVar,
+  newMVar,
+ )
+import Control.Monad.IO.Class (MonadIO (..))
+import Data.Default (Default, def)
+import Data.Text qualified as Txt
+import Data.Time
+import Data.Time.Clock.POSIX (posixSecondsToUTCTime)
+import Data.Word (Word64)
+import GHC.Stack (withFrozenCallStack)
+import GeniusYield.Imports
+import GeniusYield.TxBuilder.Errors
+import GeniusYield.Types.Address
+import GeniusYield.Types.Credential (GYCredential, GYPaymentCredential)
+import GeniusYield.Types.DRep
+import GeniusYield.Types.Datum
+import GeniusYield.Types.Epoch (GYEpochNo (GYEpochNo))
+import GeniusYield.Types.KeyRole
+import GeniusYield.Types.Logging
+import GeniusYield.Types.ProtocolParameters
+import GeniusYield.Types.Slot
+import GeniusYield.Types.SlotConfig
+import GeniusYield.Types.StakeAddressInfo (GYStakeAddressInfo)
+import GeniusYield.Types.Time (timeToPOSIX)
+import GeniusYield.Types.Tx
+import GeniusYield.Types.TxOutRef
+import GeniusYield.Types.UTxO
+import GeniusYield.Types.Value (GYAssetClass)
 
 {- Note [Caching and concurrently accessible MVars]
 
@@ -124,16 +143,19 @@ There is no (safe)way to perform IO within an 'atomically' block. So STM doesn't
 -------------------------------------------------------------------------------
 
 data GYProviders = GYProviders
-    { gyLookupDatum         :: !GYLookupDatum
-    , gySubmitTx            :: !GYSubmitTx
-    , gyAwaitTxConfirmed    :: !GYAwaitTx
-    -- ^ This is a function to see whether the submitted transaction is successfully seen on chain. __NOTE:__ Don't call `gyAwaitTxConfirmed` on transaction that has been submitted long ago as we determine presence of submitted transaction by looking for any UTxO generated by it. Though we maintain information for even spent UTxOs until the block which spent them is sufficiently deep (2160 blocks for mainnet).
-    , gySlotActions         :: !GYSlotActions
-    , gyGetParameters       :: !GYGetParameters
-    , gyQueryUTxO           :: !GYQueryUTxO
-    , gyGetStakeAddressInfo :: !(GYStakeAddress -> IO (Maybe GYStakeAddressInfo))
-    , gyLog'                :: !GYLogConfiguration
-    }
+  { gyLookupDatum :: !GYLookupDatum
+  , gySubmitTx :: !GYSubmitTx
+  , gyAwaitTxConfirmed :: !GYAwaitTx
+  -- ^ This is a function to see whether the submitted transaction is successfully seen on chain. __NOTE:__ Don't call `gyAwaitTxConfirmed` on transaction that has been submitted long ago as we determine presence of submitted transaction by looking for any UTxO generated by it. Though we maintain information for even spent UTxOs until the block which spent them is sufficiently deep (2160 blocks for mainnet).
+  , gySlotActions :: !GYSlotActions
+  , gyGetParameters :: !GYGetParameters
+  , gyQueryUTxO :: !GYQueryUTxO
+  , gyGetStakeAddressInfo :: !(GYStakeAddress -> IO (Maybe GYStakeAddressInfo))
+  , gyGetDRepState :: !(GYCredential 'GYKeyRoleDRep -> IO (Maybe GYDRepState))
+  , gyGetDRepsState :: !(Set (GYCredential 'GYKeyRoleDRep) -> IO (Map (GYCredential 'GYKeyRoleDRep) (Maybe GYDRepState)))
+  , gyLog' :: !GYLogConfiguration
+  , gyGetStakePools :: !(IO (Set Api.S.PoolId))
+  }
 
 gyGetSlotOfCurrentBlock :: GYProviders -> IO GYSlot
 gyGetSlotOfCurrentBlock = gyGetSlotOfCurrentBlock' . gySlotActions
@@ -145,45 +167,44 @@ gyWaitUntilSlot :: GYProviders -> GYSlot -> IO GYSlot
 gyWaitUntilSlot providers = gyWaitUntilSlot' (gySlotActions providers)
 
 -- | 'gyWaitForNextBlock' variant which doesn't return current slot.
---
 gyWaitForNextBlock_ :: GYProviders -> IO ()
 gyWaitForNextBlock_ = void . gyWaitForNextBlock
 
 gyQueryUtxosAtAddress :: GYProviders -> GYAddress -> Maybe GYAssetClass -> IO GYUTxOs
 gyQueryUtxosAtAddress = gyQueryUtxosAtAddress' . gyQueryUTxO
 
-gyQueryUtxosAtAddresses :: GYProviders -> [GYAddress] -> IO  GYUTxOs
+gyQueryUtxosAtAddresses :: GYProviders -> [GYAddress] -> IO GYUTxOs
 gyQueryUtxosAtAddresses = gyQueryUtxosAtAddresses' . gyQueryUTxO
 
 gyQueryUtxosAtPaymentCredential :: GYProviders -> GYPaymentCredential -> Maybe GYAssetClass -> IO GYUTxOs
 gyQueryUtxosAtPaymentCredential = gyQueryUtxosAtPaymentCredential' . gyQueryUTxO
 
-gyQueryUtxosAtPaymentCredentials :: GYProviders -> [GYPaymentCredential] -> IO  GYUTxOs
+gyQueryUtxosAtPaymentCredentials :: GYProviders -> [GYPaymentCredential] -> IO GYUTxOs
 gyQueryUtxosAtPaymentCredentials = gyQueryUtxosAtPaymentCredentials' . gyQueryUTxO
 
 gyQueryUtxosAtAddressWithDatums :: GYProviders -> GYAddress -> Maybe GYAssetClass -> IO [(GYUTxO, Maybe GYDatum)]
 gyQueryUtxosAtAddressWithDatums provider addr mAssetClass =
   case gyQueryUtxosAtAddressWithDatums' $ gyQueryUTxO provider of
     Nothing -> gyQueryUtxosAtAddressWithDatumsDefault (gyQueryUtxosAtAddress provider) (gyLookupDatum provider) addr mAssetClass
-    Just f  -> f addr mAssetClass
+    Just f -> f addr mAssetClass
 
 gyQueryUtxosAtAddressesWithDatums :: GYProviders -> [GYAddress] -> IO [(GYUTxO, Maybe GYDatum)]
 gyQueryUtxosAtAddressesWithDatums provider addrs =
   case gyQueryUtxosAtAddressesWithDatums' $ gyQueryUTxO provider of
     Nothing -> gyQueryUtxosAtAddressesWithDatumsDefault (gyQueryUtxosAtAddresses provider) (gyLookupDatum provider) addrs
-    Just f  -> f addrs
+    Just f -> f addrs
 
 gyQueryUtxosAtPaymentCredWithDatums :: GYProviders -> GYPaymentCredential -> Maybe GYAssetClass -> IO [(GYUTxO, Maybe GYDatum)]
 gyQueryUtxosAtPaymentCredWithDatums provider cred mAssetClass =
   case gyQueryUtxosAtPaymentCredWithDatums' $ gyQueryUTxO provider of
     Nothing -> gyQueryUtxosAtPaymentCredWithDatumsDefault (gyQueryUtxosAtPaymentCredential provider) (gyLookupDatum provider) cred mAssetClass
-    Just f  -> f cred mAssetClass
+    Just f -> f cred mAssetClass
 
 gyQueryUtxosAtPaymentCredsWithDatums :: GYProviders -> [GYPaymentCredential] -> IO [(GYUTxO, Maybe GYDatum)]
 gyQueryUtxosAtPaymentCredsWithDatums provider pcs =
   case gyQueryUtxosAtPaymentCredsWithDatums' $ gyQueryUTxO provider of
     Nothing -> gyQueryUtxosAtPaymentCredsWithDatumsDefault (gyQueryUtxosAtPaymentCredentials provider) (gyLookupDatum provider) pcs
-    Just f  -> f pcs
+    Just f -> f pcs
 
 gyQueryUtxosAtTxOutRefs :: GYProviders -> [GYTxOutRef] -> IO GYUTxOs
 gyQueryUtxosAtTxOutRefs = gyQueryUtxosAtTxOutRefs' . gyQueryUTxO
@@ -192,7 +213,7 @@ gyQueryUtxosAtTxOutRefsWithDatums :: GYProviders -> [GYTxOutRef] -> IO [(GYUTxO,
 gyQueryUtxosAtTxOutRefsWithDatums provider refs =
   case gyQueryUtxosAtTxOutRefsWithDatums' $ gyQueryUTxO provider of
     Nothing -> gyQueryUtxosAtTxOutRefsWithDatumsDefault (gyQueryUtxosAtTxOutRefs provider) (gyLookupDatum provider) refs
-    Just f  -> f refs
+    Just f -> f refs
 
 gyQueryUtxoAtTxOutRef :: GYProviders -> GYTxOutRef -> IO (Maybe GYUTxO)
 gyQueryUtxoAtTxOutRef = gyQueryUtxoAtTxOutRef' . gyQueryUTxO
@@ -200,7 +221,7 @@ gyQueryUtxoAtTxOutRef = gyQueryUtxoAtTxOutRef' . gyQueryUTxO
 gyQueryUtxoRefsAtAddress :: GYProviders -> GYAddress -> IO [GYTxOutRef]
 gyQueryUtxoRefsAtAddress = gyQueryUtxoRefsAtAddress' . gyQueryUTxO
 
-gyGetProtocolParameters :: GYProviders -> IO Api.S.ProtocolParameters
+gyGetProtocolParameters :: GYProviders -> IO ApiProtocolParameters
 gyGetProtocolParameters = gyGetProtocolParameters' . gyGetParameters
 
 gyGetSystemStart :: GYProviders -> IO SystemStart
@@ -208,9 +229,6 @@ gyGetSystemStart = gyGetSystemStart' . gyGetParameters
 
 gyGetEraHistory :: GYProviders -> IO Api.EraHistory
 gyGetEraHistory = gyGetEraHistory' . gyGetParameters
-
-gyGetStakePools :: GYProviders -> IO (Set Api.S.PoolId)
-gyGetStakePools = gyGetStakePools' . gyGetParameters
 
 gyGetSlotConfig :: GYProviders -> IO GYSlotConfig
 gyGetSlotConfig = gyGetSlotConfig' . gyGetParameters
@@ -238,28 +256,29 @@ type GYAwaitTx = GYAwaitTxParameters -> GYTxId -> IO ()
 
 -- | Await transaction parameters.
 data GYAwaitTxParameters = GYAwaitTxParameters
-                           { maxAttempts   :: !Int
-                           -- ^ Max number of attempts before give up.
-                           , checkInterval :: !Int
-                           -- ^ Wait time for each attempt (in microseconds).
-                           , confirmations :: !Word64
-                           -- ^ Min number of block confirmation. __NOTE:__ We might wait for more blocks than what is mentioned here but certainly not less.
-                           }
-    deriving stock (Show)
+  { maxAttempts :: !Int
+  -- ^ Max number of attempts before give up.
+  , checkInterval :: !Int
+  -- ^ Wait time for each attempt (in microseconds).
+  , confirmations :: !Word64
+  -- ^ Min number of block confirmation. __NOTE:__ We might wait for more blocks than what is mentioned here but certainly not less.
+  }
+  deriving stock Show
 
 instance Default GYAwaitTxParameters where
-    def = GYAwaitTxParameters
-          { maxAttempts   = 10
-          , checkInterval = 3_000_000
-          , confirmations = 1
-          }
+  def =
+    GYAwaitTxParameters
+      { maxAttempts = 100
+      , checkInterval = 3_000_000
+      , confirmations = 1
+      }
 
 newtype GYAwaitTxException = GYAwaitTxException GYAwaitTxParameters
-    deriving anyclass (Exception)
+  deriving anyclass Exception
 
 instance Show GYAwaitTxException where
-    show (GYAwaitTxException awaitTxParams) =
-        "Tries exceeded, given maximum: " ++ show awaitTxParams
+  show (GYAwaitTxException awaitTxParams) =
+    "Tries exceeded, given maximum: " ++ show awaitTxParams
 
 -------------------------------------------------------------------------------
 -- Current slot
@@ -267,41 +286,43 @@ instance Show GYAwaitTxException where
 
 -- | How to get current slot?
 data GYSlotActions = GYSlotActions
-    { gyGetSlotOfCurrentBlock' :: !(IO GYSlot)
-    , gyWaitForNextBlock'      :: !(IO GYSlot)
-    , gyWaitUntilSlot'         :: !(GYSlot -> IO GYSlot)
-    }
+  { gyGetSlotOfCurrentBlock' :: !(IO GYSlot)
+  , gyWaitForNextBlock' :: !(IO GYSlot)
+  , gyWaitUntilSlot' :: !(GYSlot -> IO GYSlot)
+  }
 
--- | Wait for the next block.
---
--- 'threadDelay' until current slot getter returns another value.
+{- | Wait for the next block.
+
+'threadDelay' until current slot getter returns another value.
+-}
 gyWaitForNextBlockDefault :: IO GYSlot -> IO GYSlot
 gyWaitForNextBlockDefault getSlotOfCurrentBlock = do
-    s <- getSlotOfCurrentBlock
-    go s
-  where
-    go :: GYSlot -> IO GYSlot
-    go s = do
-        threadDelay 100_000
-        t <- getSlotOfCurrentBlock
-        if t > s
-            then return t
-            else go s
+  s <- getSlotOfCurrentBlock
+  go s
+ where
+  go :: GYSlot -> IO GYSlot
+  go s = do
+    threadDelay 100_000
+    t <- getSlotOfCurrentBlock
+    if t > s
+      then return t
+      else go s
 
--- | Wait until slot.
---
--- Returns the new current slot, which might be larger.
+{- | Wait until slot.
+
+Returns the new current slot, which might be larger.
+-}
 gyWaitUntilSlotDefault :: IO GYSlot -> GYSlot -> IO GYSlot
 gyWaitUntilSlotDefault getSlotOfCurrentBlock s = loop
-  where
-    loop :: IO GYSlot
-    loop = do
-        t <- getSlotOfCurrentBlock
-        if t >= s
-            then return t
-            else do
-                threadDelay 100_000
-                loop
+ where
+  loop :: IO GYSlot
+  loop = do
+    t <- getSlotOfCurrentBlock
+    if t >= s
+      then return t
+      else do
+        threadDelay 100_000
+        loop
 
 -- | Contains the data, alongside the time after which it should be refetched.
 data GYSlotStore = GYSlotStore !UTCTime !GYSlot
@@ -311,35 +332,39 @@ a given duration of time has passed.
 
 This uses IO to set up some mutable references used for caching.
 -}
-makeSlotActions :: NominalDiffTime
-                -- ^ The time to cache current slots for.
-                -> IO GYSlot
-                -- ^ Getting current slot directly from the provider
-                -> IO GYSlotActions
+makeSlotActions ::
+  -- | The time to cache current slots for.
+  NominalDiffTime ->
+  -- | Getting current slot directly from the provider
+  IO GYSlot ->
+  IO GYSlotActions
 makeSlotActions t getSlotOfCurrentBlock = do
-    slotRefetchTime <- addUTCTime t <$> getCurrentTime
-    initSlot        <- getSlotOfCurrentBlock
-    slotStoreRef    <- newMVar $ GYSlotStore slotRefetchTime initSlot
-    let gcs = getSlotOfCurrentBlock' slotStoreRef
-    pure GYSlotActions
-        { gyGetSlotOfCurrentBlock' = gcs
-        , gyWaitForNextBlock'      = gyWaitForNextBlockDefault gcs
-        , gyWaitUntilSlot'         = gyWaitUntilSlotDefault gcs
-        }
-  where
-    getSlotOfCurrentBlock' :: MVar GYSlotStore -> IO GYSlot
-    getSlotOfCurrentBlock' var = do
-        -- See note: [Caching and concurrently accessible MVars].
-        modifyMVar var $ \(GYSlotStore slotRefetchTime slotData) -> do
-            now <- getCurrentTime
-            if now < slotRefetchTime then do
-                -- Return unmodified.
-                pure (GYSlotStore slotRefetchTime slotData, slotData)
-            else do
-                newSlot <- getSlotOfCurrentBlock
-                newNow <- getCurrentTime
-                let newSlotRefetchTime = addUTCTime t newNow
-                pure (GYSlotStore newSlotRefetchTime newSlot, newSlot)
+  getTime <- mkAutoUpdate defaultUpdateSettings {updateAction = getCurrentTime}
+  slotRefetchTime <- addUTCTime t <$> getTime
+  initSlot <- getSlotOfCurrentBlock
+  slotStoreRef <- newMVar $ GYSlotStore slotRefetchTime initSlot
+  let gcs = getSlotOfCurrentBlock' getTime slotStoreRef
+  pure
+    GYSlotActions
+      { gyGetSlotOfCurrentBlock' = gcs
+      , gyWaitForNextBlock' = gyWaitForNextBlockDefault gcs
+      , gyWaitUntilSlot' = gyWaitUntilSlotDefault gcs
+      }
+ where
+  getSlotOfCurrentBlock' :: IO UTCTime -> StrictMVar IO GYSlotStore -> IO GYSlot
+  getSlotOfCurrentBlock' getTime var = do
+    -- See note: [Caching and concurrently accessible MVars].
+    modifyMVar var $ \(GYSlotStore slotRefetchTime slotData) -> do
+      now <- getTime
+      if now < slotRefetchTime
+        then do
+          -- Return unmodified.
+          pure (GYSlotStore slotRefetchTime slotData, slotData)
+        else do
+          newSlot <- getSlotOfCurrentBlock
+          newNow <- getTime
+          let newSlotRefetchTime = addUTCTime t newNow
+          pure (GYSlotStore newSlotRefetchTime newSlot, newSlot)
 
 -------------------------------------------------------------------------------
 -- Protocol parameters
@@ -347,76 +372,77 @@ makeSlotActions t getSlotOfCurrentBlock = do
 
 -- | How to get protocol parameters? ... and other data to do balancing.
 data GYGetParameters = GYGetParameters
-    { gyGetProtocolParameters' :: !(IO Api.S.ProtocolParameters)
-    , gyGetSystemStart'        :: !(IO SystemStart)
-    , gyGetEraHistory'         :: !(IO Api.EraHistory)
-    , gyGetStakePools'         :: !(IO (Set Api.S.PoolId))
-    , gyGetSlotConfig'         :: !(IO GYSlotConfig)
-    }
+  { gyGetProtocolParameters' :: !(IO ApiProtocolParameters)
+  , gyGetSystemStart' :: !(IO SystemStart)
+  , gyGetEraHistory' :: !(IO Api.EraHistory)
+  , gyGetSlotConfig' :: !(IO GYSlotConfig)
+  }
 
--- | Contains the data, optionally alongside the slot after which it should be refetched.
-data GYParameterStore a = GYParameterStore !(Maybe GYSlot) !a
+-- | Contains the data, alongside the time after which it should be refetched.
+data GYParameterStore a = GYParameterStore !UTCTime !a
 
 {- | Construct efficient 'GYGetParameters' methods by ensuring the supplied IO queries are only made when necessary.
 
+In particular era histories and system start are cached throughout the run of the program whereas protocol parameters are cached only for a single epoch.
+
 This uses IO to set up some mutable references used for caching.
 -}
-makeGetParameters :: IO GYSlot
-                -- ^ Getting current slot
-                -> IO Api.S.ProtocolParameters
-                -- ^ Getting protocol parameters
-                -> IO SystemStart
-                -- ^ Getting system start
-                -> IO Api.EraHistory
-                -- ^ Getting era history
-                -> IO (Set Api.S.PoolId)
-                -- ^ Getting stake pools
-                -> IO GYGetParameters
-makeGetParameters getSlotOfCurrentBlock getProtParams getSysStart getEraHist getStkPools = do
-    sysStart       <- getSysStart
-    let getSlotConf = makeSlotConfigIO sysStart
-    initProtParams <- getProtParams
-    initEraHist    <- getEraHist
-    initStkPools   <- getStkPools
-    initSlotConf   <- getSlotConf initEraHist
-
-    let buildParam :: a -> GYParameterStore a
-        buildParam     = GYParameterStore (slotFromApi <$!> getEraEndSlot initEraHist)
-        getProtParams' = newMVar (buildParam initProtParams) >>= mkMethod (const getProtParams)
-        getEraHist'    = newMVar (buildParam initEraHist)    >>= mkMethod pure
-        getStkPools'   = newMVar (buildParam initStkPools)   >>= mkMethod (const getStkPools)
-        getSlotConf'   = newMVar (buildParam initSlotConf)   >>= mkMethod getSlotConf
-    pure $ GYGetParameters
-        { gyGetSystemStart' = pure sysStart
-        , gyGetProtocolParameters' = getProtParams'
-        , gyGetEraHistory' = getEraHist'
-        , gyGetStakePools' = getStkPools'
-        , gyGetSlotConfig' = getSlotConf'
-        }
-  where
-    beforeEnd _ Nothing               = True
-    beforeEnd currSlot (Just endSlot) = currSlot < endSlot
-    {- | Make an efficient 'GYGetParameters' method.
-    This will only refresh the data (using the provided 'dataRefreshF') if current slot has passed the
-    era end. It will also update the 'eraEndSlotRef' to the new era end when necessary.
-
-    If refreshing is not necessary, the data is simply returned from the storage.
-    -}
-    mkMethod :: (Api.EraHistory -> IO a) -> MVar (GYParameterStore a) -> IO a
-    mkMethod dataRefreshF dataRef = do
+makeGetParameters ::
+  -- | Getting protocol parameters
+  IO ApiProtocolParameters ->
+  -- | Getting system start
+  IO SystemStart ->
+  -- | Getting era history
+  IO Api.EraHistory ->
+  -- | Getting slot of current block (to know for epoch)
+  IO GYSlot ->
+  IO GYGetParameters
+makeGetParameters getProtParams getSysStart getEraHist getSlotOfCurrentBlock = do
+  currentSlot <- getSlotOfCurrentBlock
+  getTime <- mkAutoUpdate defaultUpdateSettings {updateAction = getCurrentTime}
+  sysStart <- getSysStart
+  let getSlotConf = makeSlotConfigIO sysStart
+  initProtParams <- getProtParams
+  cachedEraHist <- getEraHist
+  cachedSlotConf <- getSlotConf cachedEraHist
+  let GYEpochNo currentEpoch = slotToEpochPure cachedSlotConf currentSlot
+      nextEpoch = GYEpochNo (currentEpoch + 1)
+      epochSlotTime epochNo = epochToBeginSlotPure cachedSlotConf epochNo & slotToBeginTimePure cachedSlotConf & timeToPOSIX & posixSecondsToUTCTime
+      initCacheTill = epochSlotTime nextEpoch
+      timeDelta = epochSlotTime (GYEpochNo $ currentEpoch + 2) `diffUTCTime` initCacheTill
+  let buildParam :: a -> GYParameterStore a
+      buildParam = GYParameterStore initCacheTill
+      getProtParams' = mkMethod getProtParams
+      -- \| Make an efficient 'GYGetParameters' method.
+      --        This will only refresh the data (using the provided 'dataRefreshF') if current time has passed the
+      --        epoch end. It will also update the 'nextEpochBeginTime' to the new epoch end when necessary.
+      --
+      --        If refreshing is not necessary, the data is simply returned from the storage.
+      --
+      mkMethod :: IO a -> StrictMVar IO (GYParameterStore a) -> IO a
+      mkMethod dataRefreshF dataRef = do
         -- See note: [Caching and concurrently accessible MVars].
-        modifyMVar dataRef $ \(GYParameterStore eraEndSlot a) -> do
-            currSlot <- getSlotOfCurrentBlock
-            if beforeEnd currSlot eraEndSlot then
-                pure (GYParameterStore eraEndSlot a, a)
+        modifyMVar dataRef $ \(GYParameterStore nextEpochBeginTime a) -> do
+          currTime <- getTime
+          if currTime < nextEpochBeginTime
+            then pure (GYParameterStore nextEpochBeginTime a, a)
             else do
-                newEraHist <- getEraHist
-                newData    <- dataRefreshF newEraHist
-                pure (GYParameterStore (slotFromApi <$> getEraEndSlot newEraHist) newData, newData)
-    makeSlotConfigIO sysStart = either
-        (throwIO . GYConversionException . GYEraSummariesToSlotConfigError . Txt.pack)
-        pure
-        . makeSlotConfig sysStart
+              newData <- dataRefreshF
+              pure (GYParameterStore (timeDelta `addUTCTime` nextEpochBeginTime) newData, newData)
+  ppMVar <- newMVar (buildParam initProtParams)
+  pure $
+    GYGetParameters
+      { gyGetSystemStart' = pure sysStart
+      , gyGetProtocolParameters' = getProtParams' ppMVar
+      , gyGetEraHistory' = pure cachedEraHist
+      , gyGetSlotConfig' = pure cachedSlotConf
+      }
+ where
+  makeSlotConfigIO sysStart =
+    either
+      (throwIO . GYConversionException . GYEraSummariesToSlotConfigError . Txt.pack)
+      pure
+      . makeSlotConfig sysStart
 
 -------------------------------------------------------------------------------
 -- Query UTxO
@@ -424,24 +450,24 @@ makeGetParameters getSlotOfCurrentBlock getProtParams getSysStart getEraHist get
 
 -- | How to query utxos?
 data GYQueryUTxO = GYQueryUTxO
-    { gyQueryUtxosAtTxOutRefs'             :: !([GYTxOutRef] -> IO GYUTxOs)
-    , gyQueryUtxosAtTxOutRefsWithDatums'   :: !(Maybe ([GYTxOutRef] -> IO [(GYUTxO, Maybe GYDatum)]))
-    -- ^ `gyQueryUtxosAtTxOutRefsWithDatums'` is as `Maybe` so that if an implementation is not given, a default one is used.
-    , gyQueryUtxoAtTxOutRef'               :: !(GYTxOutRef -> IO (Maybe GYUTxO))
-    , gyQueryUtxoRefsAtAddress'            :: !(GYAddress -> IO [GYTxOutRef])
-    , gyQueryUtxosAtAddress'               :: !(GYAddress -> Maybe GYAssetClass -> IO GYUTxOs)
-    , gyQueryUtxosAtAddressWithDatums'     :: !(Maybe (GYAddress -> Maybe GYAssetClass -> IO [(GYUTxO, Maybe GYDatum)]))
-    , gyQueryUtxosAtAddresses'             :: !([GYAddress] -> IO GYUTxOs)
-    , gyQueryUtxosAtAddressesWithDatums'   :: !(Maybe ([GYAddress] -> IO [(GYUTxO, Maybe GYDatum)]))
-    -- ^ `gyQueryUtxosAtAddressesWithDatums'` is as `Maybe` so that if an implementation is not given, a default one is used.
-    , gyQueryUtxosAtPaymentCredential'     :: !(GYPaymentCredential -> Maybe GYAssetClass -> IO GYUTxOs)
-    , gyQueryUtxosAtPaymentCredWithDatums' :: !(Maybe (GYPaymentCredential -> Maybe GYAssetClass -> IO [(GYUTxO, Maybe GYDatum)]))
-    -- ^ `gyQueryUtxosAtPaymentCredWithDatums'` is as `Maybe` so that if an implementation is not given, a default one is used.
-    , gyQueryUtxosAtPaymentCredentials'    :: !([GYPaymentCredential] -> IO GYUTxOs)
-    , gyQueryUtxosAtPaymentCredsWithDatums'
-                                           :: !(Maybe ([GYPaymentCredential] -> IO [(GYUTxO, Maybe GYDatum)]))
-    -- ^ `gyQueryUtxosAtPaymentCredsWithDatums'` is as `Maybe` so that if an implementation is not given, a default one is used.
-    }
+  { gyQueryUtxosAtTxOutRefs' :: !([GYTxOutRef] -> IO GYUTxOs)
+  , gyQueryUtxosAtTxOutRefsWithDatums' :: !(Maybe ([GYTxOutRef] -> IO [(GYUTxO, Maybe GYDatum)]))
+  -- ^ `gyQueryUtxosAtTxOutRefsWithDatums'` is as `Maybe` so that if an implementation is not given, a default one is used.
+  , gyQueryUtxoAtTxOutRef' :: !(GYTxOutRef -> IO (Maybe GYUTxO))
+  , gyQueryUtxoRefsAtAddress' :: !(GYAddress -> IO [GYTxOutRef])
+  , gyQueryUtxosAtAddress' :: !(GYAddress -> Maybe GYAssetClass -> IO GYUTxOs)
+  , gyQueryUtxosAtAddressWithDatums' :: !(Maybe (GYAddress -> Maybe GYAssetClass -> IO [(GYUTxO, Maybe GYDatum)]))
+  , gyQueryUtxosAtAddresses' :: !([GYAddress] -> IO GYUTxOs)
+  , gyQueryUtxosAtAddressesWithDatums' :: !(Maybe ([GYAddress] -> IO [(GYUTxO, Maybe GYDatum)]))
+  -- ^ `gyQueryUtxosAtAddressesWithDatums'` is as `Maybe` so that if an implementation is not given, a default one is used.
+  , gyQueryUtxosAtPaymentCredential' :: !(GYPaymentCredential -> Maybe GYAssetClass -> IO GYUTxOs)
+  , gyQueryUtxosAtPaymentCredWithDatums' :: !(Maybe (GYPaymentCredential -> Maybe GYAssetClass -> IO [(GYUTxO, Maybe GYDatum)]))
+  -- ^ `gyQueryUtxosAtPaymentCredWithDatums'` is as `Maybe` so that if an implementation is not given, a default one is used.
+  , gyQueryUtxosAtPaymentCredentials' :: !([GYPaymentCredential] -> IO GYUTxOs)
+  , gyQueryUtxosAtPaymentCredsWithDatums' ::
+      !(Maybe ([GYPaymentCredential] -> IO [(GYUTxO, Maybe GYDatum)]))
+  -- ^ `gyQueryUtxosAtPaymentCredsWithDatums'` is as `Maybe` so that if an implementation is not given, a default one is used.
+  }
 
 -- | Query Utxo Refs at address (default implementation)
 gyQueryUtxoRefsAtAddressDefault :: (GYAddress -> Maybe GYAssetClass -> IO GYUTxOs) -> GYAddress -> IO [GYTxOutRef]
@@ -495,9 +521,9 @@ utxosDatumResolver utxos lookupDatumFun = do
   let utxosWithoutDatumResolutions = utxosToList utxos
   forM utxosWithoutDatumResolutions $ \utxo -> do
     case utxoOutDatum utxo of
-      GYOutDatumNone     -> return (utxo, Nothing)
+      GYOutDatumNone -> return (utxo, Nothing)
       GYOutDatumInline d -> return (utxo, Just d)
-      GYOutDatumHash h   -> (utxo, ) <$> lookupDatumFun h
+      GYOutDatumHash h -> (utxo,) <$> lookupDatumFun h
 
 -- | Lookup UTxOs at zero or more 'GYTxOutRef' with their datums. This is a default implementation using `utxosAtTxOutRefs` and `lookupDatum`.
 gyQueryUtxosAtTxOutRefsWithDatumsDefault :: Monad m => ([GYTxOutRef] -> m GYUTxOs) -> (GYDatumHash -> m (Maybe GYDatum)) -> [GYTxOutRef] -> m [(GYUTxO, Maybe GYDatum)]
@@ -505,9 +531,9 @@ gyQueryUtxosAtTxOutRefsWithDatumsDefault utxosAtTxOutRefsFun lookupDatumFun refs
   utxosWithoutDatumResolutions <- utxosToList <$> utxosAtTxOutRefsFun refs
   forM utxosWithoutDatumResolutions $ \utxo -> do
     case utxoOutDatum utxo of
-      GYOutDatumNone     -> return (utxo, Nothing)
+      GYOutDatumNone -> return (utxo, Nothing)
       GYOutDatumInline d -> return (utxo, Just d)
-      GYOutDatumHash h   -> (utxo, ) <$> lookupDatumFun h
+      GYOutDatumHash h -> (utxo,) <$> lookupDatumFun h
 
 -------------------------------------------------------------------------------
 -- Logging
@@ -517,20 +543,20 @@ gyLog :: (HasCallStack, MonadIO m) => GYProviders -> GYLogNamespace -> GYLogSeve
 gyLog providers ns s msg =
   let cfg = gyLog' providers
       cfg' = cfgAddNamespace ns cfg
-  in withFrozenCallStack $ liftIO $ logRun cfg' s msg
+   in withFrozenCallStack $ liftIO $ logRun cfg' s msg
 
 gyLogDebug, gyLogInfo, gyLogWarning, gyLogError :: (HasCallStack, MonadIO m) => GYProviders -> GYLogNamespace -> String -> m ()
-gyLogDebug   p ns = withFrozenCallStack $ gyLog p ns GYDebug
-gyLogInfo    p ns = withFrozenCallStack $ gyLog p ns GYInfo
+gyLogDebug p ns = withFrozenCallStack $ gyLog p ns GYDebug
+gyLogInfo p ns = withFrozenCallStack $ gyLog p ns GYInfo
 gyLogWarning p ns = withFrozenCallStack $ gyLog p ns GYWarning
-gyLogError   p ns = withFrozenCallStack $ gyLog p ns GYError
+gyLogError p ns = withFrozenCallStack $ gyLog p ns GYError
 
 noLogging :: GYLogConfiguration
 noLogging =
   GYLogConfiguration
     { cfgLogContexts = mempty
     , cfgLogNamespace = mempty
-    , cfgLogDirector = Right $ GYRawLog { rawLogRun = unitRawLogger, rawLogCleanUp = pure () }
+    , cfgLogDirector = Right $ GYRawLog {rawLogRun = unitRawLogger, rawLogCleanUp = pure ()}
     }
 
 -- | Logging messages using the given severity filter with given IO action.
@@ -539,5 +565,5 @@ simpleLogging targetSev f =
   GYLogConfiguration
     { cfgLogContexts = mempty
     , cfgLogNamespace = mempty
-    , cfgLogDirector = Right $ GYRawLog { rawLogRun = simpleRawLogger targetSev f, rawLogCleanUp = pure () }
+    , cfgLogDirector = Right $ GYRawLog {rawLogRun = simpleRawLogger targetSev f, rawLogCleanUp = pure ()}
     }
