@@ -15,18 +15,24 @@ module GeniusYield.Providers.Node (
   nodeStakePools,
   nodeGetDRepState,
   nodeGetDRepsState,
+  nodeConstitution,
+  nodeProposals,
+  nodeCommitteeMembersState,
+  nodeMempoolTxs,
 
   -- * Auxiliary
   networkIdToLocalNodeConnectInfo,
 ) where
 
 import Cardano.Api qualified as Api
+import Cardano.Api.Ledger qualified as Ledger
 import Cardano.Api.Shelley qualified as Api.S
-import Cardano.Ledger.Coin qualified as Ledger
+import Cardano.Ledger.Api.State.Query qualified as Ledger
 import Cardano.Slotting.Time (SystemStart)
 import Control.Exception (throwIO)
 import Data.Map.Strict qualified as Map
-import Data.Maybe (listToMaybe)
+import Data.Maybe (listToMaybe, mapMaybe)
+import Data.Sequence qualified as Seq
 import Data.Set qualified as Set
 import Data.Text qualified as Txt
 import GeniusYield.CardanoApi.Query
@@ -86,6 +92,16 @@ nodeGetDRepsState info dreps = do
   let gymcredState = Map.foldlWithKey' (\m k v -> Map.insert (credentialFromLedger k) (Just $ drepStateFromLedger v) m) Map.empty mcredState
   pure $ Set.foldl' (\mapAcc drep -> if Map.member drep mapAcc then mapAcc else Map.insert drep Nothing mapAcc) gymcredState dreps
 
+nodeConstitution :: Api.LocalNodeConnectInfo -> IO GYConstitution
+nodeConstitution info = constitutionFromLedger <$> queryConwayEra info Api.QueryConstitution
+
+nodeProposals :: Api.LocalNodeConnectInfo -> Set.Set GYGovActionId -> IO (Seq.Seq GYGovActionState)
+nodeProposals info (Set.map govActionIdToLedger -> proposals) = do
+  fmap govActionStateFromLedger <$> queryConwayEra info (Api.QueryProposals proposals)
+
+nodeCommitteeMembersState :: Api.LocalNodeConnectInfo -> IO Ledger.CommitteeMembersState
+nodeCommitteeMembersState info = queryConwayEra info $ Api.QueryCommitteeMembersState mempty mempty mempty
+
 nodeStakePools :: Api.LocalNodeConnectInfo -> IO (Set.Set Api.S.PoolId)
 nodeStakePools info = queryConwayEra info Api.QueryStakePools
 
@@ -108,6 +124,24 @@ systemStart info = queryCardanoMode info Api.QuerySystemStart
 
 eraHistory :: Api.LocalNodeConnectInfo -> IO Api.EraHistory
 eraHistory info = makeLastEraEndUnbounded <$> queryCardanoMode info Api.QueryEraHistory
+
+nodeMempoolTxs :: Api.LocalNodeConnectInfo -> IO [GYTx]
+nodeMempoolTxs info = do
+  apiTxs <- go []
+  pure $ mapMaybe getGYTx apiTxs
+ where
+  go acc = do
+    apiTx <- Api.queryTxMonitoringLocal info Api.LocalTxMonitoringSendNextTx
+    case apiTx of
+      Api.LocalTxMonitoringNextTx mnextTx _slotNo -> case mnextTx of
+        Just nextTx -> go (nextTx : acc)
+        Nothing -> return $ finaliseAcc acc
+      _anyOther -> return $ finaliseAcc acc
+   where
+    finaliseAcc = reverse
+  getGYTx :: Api.TxInMode -> Maybe GYTx
+  getGYTx (Api.TxInMode Api.ShelleyBasedEraConway tx) = Just $ txFromApi tx
+  getGYTx _anyOther = Nothing
 
 -------------------------------------------------------------------------------
 -- Auxiliary functions

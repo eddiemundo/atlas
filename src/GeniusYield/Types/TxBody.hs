@@ -6,43 +6,46 @@ Maintainer  : support@geniusyield.co
 Stability   : develop
 -}
 module GeniusYield.Types.TxBody (
-    -- * Transaction body
-    GYTxBody,
-    -- * Conversions
-    txBodyFromApi,
-    txBodyToApi,
-    -- * Transaction creation
-    signGYTxBody,
-    signGYTxBody',
-    signTx,
-    unsignedTx,
-    makeSignedTransaction,
-    makeSignedTransaction',
-    appendWitnessGYTx,
-    signGYTx,
-    signGYTx',
-    -- * Functions
-    getTxBody,
-    txBodyCollateral,
-    txBodyCollateralReturnOutput,
-    txBodyCollateralReturnOutputValue,
-    txBodyFee,
-    txBodyFeeValue,
-    txBodyFromCBOR,
-    txBodyFromHex,
-    txBodyFromHexBS,
-    txBodyMintValue,
-    txBodyReqSignatories,
-    txBodyRequiredExtraWitnesses,
-    txBodyToApiTxBodyContent,
-    txBodyToHex,
-    txBodyToHexBS,
-    txBodyTotalCollateralLovelace,
-    txBodyTxId,
-    txBodyTxIns,
-    txBodyTxInsReference,
-    txBodyUTxOs,
-    txBodyValidityRange,
+  -- * Transaction body
+  GYTxBody,
+
+  -- * Conversions
+  txBodyFromApi,
+  txBodyToApi,
+
+  -- * Transaction creation
+  signGYTxBody,
+  signGYTxBody',
+  signTx,
+  unsignedTx,
+  makeSignedTransaction,
+  makeSignedTransaction',
+  appendWitnessGYTx,
+  signGYTx,
+  signGYTx',
+
+  -- * Functions
+  txBodyFromHex,
+  txBodyFromHexBS,
+  txBodyFromCBOR,
+  txBodyToHex,
+  txBodyToHexBS,
+  txBodyFee,
+  txBodyFeeValue,
+  txBodyUTxOs,
+  txBodyUTxOsWithDatums,
+  txBodyTxIns,
+  txBodyTxInsReference,
+  txBodyTxId,
+  txBodyToApiTxBodyContent,
+  txBodyReqSignatories,
+  txBodyMintValue,
+  txBodyValidityRange,
+  txBodyCollateral,
+  txBodyCollateralReturnOutput,
+  txBodyCollateralReturnOutputValue,
+  txBodyTotalCollateralLovelace,
+  getTxBody,
 ) where
 
 import Cardano.Api qualified as Api
@@ -54,6 +57,7 @@ import Data.ByteString.Char8 qualified as BS8
 import Data.Set qualified as Set
 
 import GeniusYield.Imports
+import GeniusYield.Types.Datum (GYDatum)
 import GeniusYield.Types.Era
 import GeniusYield.Types.Key (GYSomeSigningKey (GYSomeSigningKey))
 import GeniusYield.Types.Key.Class (
@@ -171,8 +175,8 @@ txBodyToCBOR = Api.serialiseToCBOR . txBodyToApi
 
 -- | Return the fees in lovelace.
 txBodyFee :: GYTxBody -> Integer
-txBodyFee (GYTxBody (Api.TxBody Api.TxBodyContent {Api.txFee = fee})) =
-  case fee of
+txBodyFee (GYTxBody body) =
+  case Api.txFee $ Api.getTxBodyContent body of
     Api.TxFeeExplicit _ (Ledger.Coin actual) -> actual
 
 -- | Return the fees as 'GYValue'.
@@ -181,23 +185,30 @@ txBodyFeeValue = valueFromLovelace . txBodyFee
 
 -- | Return utxos created by tx (body).
 txBodyUTxOs :: GYTxBody -> GYUTxOs
-txBodyUTxOs (GYTxBody body@(Api.TxBody Api.TxBodyContent {txOuts})) =
-  utxosFromList $ zipWith f [0 ..] txOuts
+txBodyUTxOs = utxosFromList . fmap fst . txBodyUTxOsWithDatums
+
+txBodyUTxOsWithDatums :: GYTxBody -> [(GYUTxO, Maybe GYDatum)]
+txBodyUTxOsWithDatums (GYTxBody body) =
+  zipWith f [0 ..] txOuts
  where
+  txOuts = Api.txOuts $ Api.getTxBodyContent body
+
   txId = Api.getTxId body
 
-  f :: Word -> Api.TxOut Api.CtxTx ApiEra -> GYUTxO
-  f i = utxoFromApi (Api.TxIn txId (Api.TxIx i))
+  f :: Word -> Api.TxOut Api.CtxTx ApiEra -> (GYUTxO, Maybe GYDatum)
+  f i = utxoFromApiWithDatum (Api.TxIn txId (Api.TxIx i))
 
 -- | Returns the 'GYTxOutRef' consumed by the tx.
 txBodyTxIns :: GYTxBody -> [GYTxOutRef]
-txBodyTxIns (GYTxBody (Api.TxBody Api.TxBodyContent {txIns})) = map (txOutRefFromApi . fst) txIns
+txBodyTxIns (GYTxBody body) =
+  map (txOutRefFromApi . fst) $ Api.txIns $ Api.getTxBodyContent body
 
 -- | Returns the 'GYTxOutRef' for the reference inputs present in the tx.
 txBodyTxInsReference :: GYTxBody -> [GYTxOutRef]
-txBodyTxInsReference (GYTxBody (Api.TxBody Api.TxBodyContent {txInsReference})) = case txInsReference of
-  Api.TxInsReferenceNone -> []
-  Api.TxInsReference Api.S.BabbageEraOnwardsConway inRefs -> map txOutRefFromApi inRefs
+txBodyTxInsReference (GYTxBody body) =
+  case Api.txInsReference $ Api.getTxBodyContent body of
+    Api.TxInsReferenceNone -> []
+    Api.TxInsReference Api.S.BabbageEraOnwardsConway inRefs -> map txOutRefFromApi inRefs
 
 -- | Returns the 'GYTxId' of the given 'GYTxBody'.
 txBodyTxId :: GYTxBody -> GYTxId
@@ -208,7 +219,7 @@ getTxBody :: GYTx -> GYTxBody
 getTxBody = txBodyFromApi . Api.getTxBody . txToApi
 
 txBodyToApiTxBodyContent :: GYTxBody -> Api.TxBodyContent Api.ViewTx ApiEra
-txBodyToApiTxBodyContent body = let Api.TxBody bc = txBodyToApi body in bc
+txBodyToApiTxBodyContent body = Api.getTxBodyContent $ txBodyToApi body
 
 -- | Returns the required signatories of the given 'GYTxBody'.
 txBodyReqSignatories :: GYTxBody -> Set.Set GYPubKeyHash
@@ -218,9 +229,7 @@ txBodyReqSignatories body = case Api.txExtraKeyWits $ txBodyToApiTxBodyContent b
 
 -- | Returns the mint 'GYValue' of the given 'GYTxBody'.
 txBodyMintValue :: GYTxBody -> GYValue
-txBodyMintValue body = case Api.txMintValue $ txBodyToApiTxBodyContent body of
-  Api.TxMintNone -> mempty
-  Api.TxMintValue _ v _ -> valueFromApi v
+txBodyMintValue body = valueFromApi $ Api.txMintValueToValue $ Api.txMintValue $ txBodyToApiTxBodyContent body
 
 -- | Returns the validity range of the given 'GYTxBody'.
 txBodyValidityRange :: GYTxBody -> (Maybe GYSlot, Maybe GYSlot)

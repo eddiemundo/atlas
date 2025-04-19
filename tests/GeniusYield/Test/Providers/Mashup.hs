@@ -6,8 +6,8 @@ import Control.Concurrent (threadDelay)
 import Control.Exception (handle)
 import Data.Default (def)
 import Data.List (isInfixOf)
-import Data.Maybe (fromJust)
-import Data.Set qualified as Set (difference, fromList)
+import Data.Maybe (fromJust, listToMaybe)
+import Data.Set qualified as Set (difference, fromList, isSubsetOf)
 import GeniusYield.CardanoApi.EraHistory (extractEraSummaries)
 import GeniusYield.GYConfig
 import GeniusYield.Imports
@@ -32,6 +32,14 @@ providersMashupTests configs =
         delayBySecond
         dats <- forM configs $ \config -> withCfgProviders config mempty $ \GYProviders {..} -> fromJust <$> gyLookupDatum "a7ed3e81ef2e98a85c8d5649ed6344b7f7b36a31103ab18395ef4e80b8cac565" -- A datum hash seen at always fail script's address.
         assertBool "Datums are not all equal" $ allEqual dats
+    , testCase "Fetching constitution" $ do
+        constitutions <- forM (supportedProviders configs) $ \config -> withCfgProviders config mempty $ \GYProviders {..} -> do
+          gyGetConstitution
+        assertBool "Constitutions are not all equal" $ allEqual constitutions
+    , testCase "Fetching proposals" $ do
+        proposalsList <- forM (supportedProviders configs) $ \config -> withCfgProviders config mempty $ \GYProviders {..} -> do
+          gyGetProposals mempty
+        assertBool "Proposals are not all equal" $ allEqual proposalsList
     , testCase "Parameters" $ do
         paramsList <- forM configs $ \config -> withCfgProviders config mempty $ \provider -> do
           delayBySecond
@@ -123,7 +131,7 @@ providersMashupTests configs =
           handler :: SubmitTxException -> IO GYTxId
           handler e =
             let errorText = show e
-             in ( if "BadInputsUTxO" `isInfixOf` errorText
+             in ( if "BadInputsUTxO" `isInfixOf` errorText || "unknownOutputReferences" `isInfixOf` errorText
                     then
                       pure "6c751d3e198c5608dfafdfdffe16aeac8a28f88f3a769cf22dd45e8bc84f47e8" -- Any transaction ID.
                     else error $ "Not satisfied, error text: " <> errorText
@@ -148,6 +156,14 @@ providersMashupTests configs =
           printf "Signed tx: %s\n" (txToHex signedTxBody)
           tid <- gySubmitTx signedTxBody
           printf "Submitted tx: %s\n" tid
+          when (isProviderSupported config) $ do
+            mempoolTxs' <- runGYTxQueryMonadIO nid provider mempoolTxs
+            mempoolAugmentedSenderUTxOs <- runGYTxQueryMonadIO nid provider $ utxosAtAddress senderAddress Nothing
+            let mempoolUTxOsList = txBodyUTxOs . getTxBody <$> mempoolTxs'
+            assertBool "Submitted tx not found in mempool" $ signedTxBody `elem` mempoolTxs'
+            case listToMaybe mempoolUTxOsList of
+              Nothing -> assertFailure "No UTxOs found in mempool transactions"
+              Just mempoolUTxOs -> assertBool "not (mempool UTxOs are not empty and sender augmented UTxOs contain them)" $ (mempoolUTxOs /= mempty) && (utxosRefs' mempoolUTxOs `Set.isSubsetOf` utxosRefs' mempoolAugmentedSenderUTxOs)
           gyAwaitTxConfirmed (GYAwaitTxParameters {maxAttempts = 20, confirmations = 1, checkInterval = 10_000_000}) tid
     , testCase "Await Tx Confirmed - Submitted Tx" $
         forM_ configs $ \config -> withCfgProviders config mempty $
@@ -165,3 +181,12 @@ providersMashupTests configs =
 allEqual :: Eq a => [a] -> Bool
 allEqual [] = True
 allEqual (x : xs) = all (== x) xs
+
+supportedProviders :: [GYCoreConfig] -> [GYCoreConfig]
+supportedProviders = filter isProviderSupported
+
+isProviderSupported :: GYCoreConfig -> Bool
+isProviderSupported (cfgCoreProvider -> cp) = case cp of
+  GYMaestro {} -> False
+  GYBlockfrost {} -> False
+  _anyOther -> True

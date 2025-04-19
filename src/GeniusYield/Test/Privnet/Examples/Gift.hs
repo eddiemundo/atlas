@@ -323,7 +323,7 @@ tests setup =
         -- NOTE: TxValidationErrorInMode (ShelleyTxValidationError ShelleyBasedEraBabbage (ApplyTxError [UtxowFailure (FromAlonzoUtxowFail (WrappedShelleyEraFailure (ExtraneousScriptWitnessesUTXOW
         -- Apparently we MUST NOT include the script if there is a utxo input with that script. Even if we consume that utxo.
         ctxRun ctx (ctxUser2 ctx) $ do
-          grabGiftsTx' <- grabGiftsRef ref giftValidatorV2 >>= traverse buildTxBody
+          grabGiftsTx' <- grabGiftsRef @_ @'PlutusV2 ref giftValidatorV2 >>= traverse buildTxBody
           mapM_ signAndSubmitConfirmed grabGiftsTx'
 
         -- Check final balance
@@ -395,21 +395,17 @@ tests setup =
           "User2 token balance"
           (valueSingleton ironAC 10)
           (snd (valueSplitAda diff2))
-    , testCaseSteps "refscript_mixup" $ \info -> withSetup info setup $ \ctx -> do
-        -- in this test we consume 'PlutusV1 UTxO and 'PlutusV2 UTxO
-        -- that should be fine, but we are using reference scripts for consuming 'PlutusV2
-        -- and that is not supported.
-        --
+    , testCaseSteps "refscript_mixup_v2_v1" $ \info -> withSetup info setup $ \ctx -> do
+        -- in this test we consume 'PlutusV1 UTxO and 'PlutusV2 UTxO where both the scripts are given by reference. This is supported as of conway.
         let ironAC = ctxIron ctx
 
-        -- in this test we create an output with reference script
+        refV2 <- ctxRun ctx (ctxUserF ctx) . addRefScriptToLimbo $ validatorToScript giftValidatorV2
 
-        -- this creates utxo which looks like
-        --
-        -- 3c6ad9c5c512c06add1cd6bb513f1e879d5cadbe70f4762d4ff810d37ab9e0c0     1        1081810 lovelace + TxOutDatumHash ScriptDataInBabbageEra "923918e403bf43c34b4ef6b48eb2ee04babed17320d8d1b9ff9ad086e86f44ec"
-        ref <- ctxRun ctx (ctxUserF ctx) . addRefScriptToLimbo $ validatorToScript giftValidatorV2
+        info $ "Reference (v2 script) at " ++ show refV2
 
-        info $ "Reference at " ++ show ref
+        refV1 <- ctxRun ctx (ctxUserF ctx) . addRefScriptToLimbo $ validatorToScript giftValidatorV1
+
+        info $ "Reference (v1 script) at " ++ show refV1
 
         -- put some V2 gifts
         ctxRun ctx (ctxUserF ctx) $ do
@@ -428,15 +424,50 @@ tests setup =
           signAndSubmitConfirmed_ txBodyPlaceV1
 
         info "Put V1 gifts"
-    , -- Try to consume V1 and V2 gifts in the same transaction
-      {- Doesn't compile.
-      assertThrown isTxBodyErrorAutoBalance $ ctxRunF ctx (ctxUser2 ctx) $ do
-          sV2 <- grabGiftsRef ref giftValidatorV2
-          sV1 <- grabGifts giftValidatorV1
-          return (liftA2 (<>) sV2 sV1)
-      -}
+        grabTxId <- ctxRun ctx (ctxUserF ctx) $ do
+          v2Gifts <- grabGiftsRef refV2 giftValidatorV2
+          v1Gifts <- grabGiftsRef refV1 giftValidatorV1
+          let gifts :: Maybe (GYTxSkeleton 'PlutusV1) = liftA2 (<>) v2Gifts v1Gifts
+          grabGiftsTx' <- traverse buildTxBody gifts
+          mapM signAndSubmitConfirmed grabGiftsTx'
+        info $ "Grabbed gifts tx : " ++ show grabTxId
+    , testCaseSteps "refscript_mixup_v2_v3" $ \info -> withSetup info setup $ \ctx -> do
+        -- in this test we consume both plutus v2 and v3 reference scripts in a single transaction.
+        --
+        let ironAC = ctxIron ctx
 
-      testCaseSteps "inline datums V1+V2" $ \info -> withSetup info setup $ \ctx -> do
+        refV2 <- ctxRun ctx (ctxUserF ctx) . addRefScriptToLimbo $ validatorToScript giftValidatorV2
+        refV3 <- ctxRun ctx (ctxUserF ctx) . addRefScriptToLimbo $ validatorToScript giftValidatorV3
+
+        info $ "Reference (V2) at " ++ show refV2
+        info $ "Reference (V3) at " ++ show refV3
+
+        -- put some V2 gifts
+        ctxRun ctx (ctxUserF ctx) $ do
+          addr <- scriptAddress giftValidatorV2
+          txBodyPlaceV2 <- buildTxBody $ mustHaveOutput $ mkGYTxOut addr (valueSingleton ironAC 10) (datumFromPlutusData ())
+
+          signAndSubmitConfirmed_ txBodyPlaceV2
+
+        info "Put V2 gifts"
+
+        -- put some V3 gifts
+        ctxRun ctx (ctxUserF ctx) $ do
+          addr <- scriptAddress giftValidatorV3
+          txBodyPlaceV3 <- buildTxBody $ mustHaveOutput $ mkGYTxOut addr (valueSingleton ironAC 10) (datumFromPlutusData ())
+
+          signAndSubmitConfirmed_ txBodyPlaceV3
+
+        info "Put V3 gifts"
+        grabTxBody <- ctxRun ctx (ctxUserF ctx) $ do
+          v2Gifts <- grabGiftsRef refV2 giftValidatorV2
+          v3Gifts <- grabGiftsRef refV3 giftValidatorV3
+          let gifts :: Maybe (GYTxSkeleton 'PlutusV2) = liftA2 (<>) v2Gifts v3Gifts
+          grabGiftsTx' <- traverse buildTxBody gifts
+          mapM_ signAndSubmitConfirmed grabGiftsTx'
+          pure grabGiftsTx'
+        info $ "Grabbed gifts tx body: " ++ show grabTxBody
+    , testCaseSteps "inline datums V1+V2" $ \info -> withSetup info setup $ \ctx -> do
         -- in this test we consume UTxO with Plutus V1 script
         -- and in the same transaction create an output where we force inline datum usage
         --
@@ -618,10 +649,11 @@ grabGifts validator = do
 
 -- | Grab gifts using a referenced validator.
 grabGiftsRef ::
-  GYTxQueryMonad m =>
+  forall m u v.
+  (GYTxQueryMonad m, v `VersionIsGreaterOrEqual` u) =>
   GYTxOutRef ->
-  GYScript 'PlutusV2 ->
-  m (Maybe (GYTxSkeleton 'PlutusV2))
+  GYScript v ->
+  m (Maybe (GYTxSkeleton u))
 grabGiftsRef ref validator = do
   addr <- scriptAddress validator
   utxo <- utxosAtAddress addr Nothing

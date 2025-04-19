@@ -67,11 +67,11 @@ stakePoolIdFromApi :: Api.Hash Api.StakePoolKey -> GYStakePoolId
 stakePoolIdFromApi = keyHashFromApi
 
 -- | Convert to corresponding ledger type.
-stakePoolIdToLedger :: GYStakePoolId -> Ledger.KeyHash Ledger.StakePool Ledger.StandardCrypto
+stakePoolIdToLedger :: GYStakePoolId -> Ledger.KeyHash Ledger.StakePool
 stakePoolIdToLedger = keyHashToLedger
 
 -- | Convert from corresponding ledger type.
-stakePoolIdFromLedger :: Ledger.KeyHash Ledger.StakePool Ledger.StandardCrypto -> GYStakePoolId
+stakePoolIdFromLedger :: Ledger.KeyHash Ledger.StakePool -> GYStakePoolId
 stakePoolIdFromLedger = keyHashFromLedger
 
 {- | Obtain `GYStakePoolId` from bech32 encoding of stake pool id.
@@ -152,6 +152,9 @@ instance FromJSON GYStakePoolIdBech32 where
     case stakePoolIdFromTextMaybe t of
       Just stakePoolId -> return $ GYStakePoolIdBech32 stakePoolId
       Nothing -> fail "cannot deserialise stake pool id"
+
+instance Aeson.FromJSONKey GYStakePoolIdBech32 where
+  fromJSONKey = Aeson.FromJSONKeyTextParser (either (fail . Text.unpack) pure . Web.parseUrlPiece)
 
 {- |
 

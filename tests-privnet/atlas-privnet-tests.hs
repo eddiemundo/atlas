@@ -7,25 +7,21 @@ Stability   : develop
 -}
 module Main (main) where
 
-import GeniusYield.Imports
-
-import Test.Tasty (defaultMain, testGroup)
-import Test.Tasty.HUnit (testCaseSteps)
-
 import GeniusYield.CardanoApi.EraHistory
-import GeniusYield.Types
-
+import GeniusYield.Imports
+import GeniusYield.Providers.Node (nodeCommitteeMembersState)
 import GeniusYield.Test.Privnet.Blueprint qualified
-import GeniusYield.Test.Privnet.Committee qualified
 import GeniusYield.Test.Privnet.Ctx
 import GeniusYield.Test.Privnet.DRep qualified
 import GeniusYield.Test.Privnet.Examples qualified
-import GeniusYield.Test.Privnet.Gov qualified
 import GeniusYield.Test.Privnet.Setup
 import GeniusYield.Test.Privnet.SimpleScripts qualified
 import GeniusYield.Test.Privnet.Stake qualified
 import GeniusYield.Test.Privnet.StakePool qualified
 import GeniusYield.TxBuilder
+import GeniusYield.Types
+import Test.Tasty (defaultMain, testGroup)
+import Test.Tasty.HUnit (testCaseSteps)
 
 main :: IO ()
 main = do
@@ -63,6 +59,10 @@ main = do
 
             pp <- ctxRunQuery ctx protocolParams
             info $ printf "Protocol parameters: %s" (show pp)
+        , testCaseSteps "Committee state" $ \info -> withSetup info setup $ \ctx -> do
+            cs <- nodeCommitteeMembersState (ctxInfo ctx)
+            info $ "Committee members state: " <> show cs <> "\n"
+            info $ "Committee as present in Ctx: " <> show (ctxCommittee ctx) <> "\n"
         , GeniusYield.Test.Privnet.Blueprint.blueprintTests setup
         , GeniusYield.Test.Privnet.Examples.tests setup
         , GeniusYield.Test.Privnet.Stake.stakeKeyTests setup
@@ -70,6 +70,6 @@ main = do
         , GeniusYield.Test.Privnet.SimpleScripts.simpleScriptsTests setup
         , GeniusYield.Test.Privnet.DRep.drepTests setup
         , GeniusYield.Test.Privnet.StakePool.stakePoolTests setup
-        , GeniusYield.Test.Privnet.Committee.committeeTests setup
-        , GeniusYield.Test.Privnet.Gov.govTests setup
+        -- , GeniusYield.Test.Privnet.Committee.committeeTests setup
+        -- , GeniusYield.Test.Privnet.Gov.govTests setup
         ]

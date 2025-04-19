@@ -1,3 +1,23 @@
+## 0.12.0
+
+* `valueAdjust` now omits for entries if result of adjustment is zero.
+* Port coin selection algorithm from [`cardano-wallet`](https://github.com/cardano-foundation/cardano-wallet) to Atlas. This is done in sync with our 3rd Milestone and allows us to support latest versions of node & other IOG tooling.
+* Update to latest IOG dependencies.
+* Support of monitoring mempool transactions (`mempoolTxs` query function).
+* Support of government related queries such as `constitution` (to query the current constitution definition) and `proposals` (to fetch for proposals that are considered for ratification)
+* Support of mempool based caching, enabled by setting `mempoolCache` in provider's configuration.
+* Support of local transaction submission based caching (i.e., submitted transactions are considered to know for to be made available outputs & spent outputs), enabled by setting `localTxSubmissionCache` in provider's configuration.
+
+## 0.11.1
+
+* Adds support of Ogmios-Kupo provider, see section on providers at https://atlas-app.io/getting-started/endpoints.
+* `ToJSON` instance for `GYTxOutRefCbor`.
+* New `GeniusYield.Debug` module to perform Atlas's operation from repl.
+
+## 0.11.0
+
+* Allows reference scripts to be of version greater than the minimum supported constrained version of `GYTxSkeleton`. Thanks [@SeungheonOh](https://github.com/SeungheonOh) for finding [this bug](https://github.com/geniusyield/atlas/issues/404)! Please visit the linked issue for more details.
+
 ## 0.10.0
 
 * Support of extended keys in `runGYTxMonadIO`.

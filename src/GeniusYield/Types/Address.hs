@@ -42,6 +42,7 @@ module GeniusYield.Types.Address (
   unsafeStakeAddressFromText,
   stakeAddressToText,
   stakeAddressToLedger,
+  stakeAddressFromLedger,
   stakeAddressCredential,
   stakeAddressToCredential,
   stakeAddressFromCredential,
@@ -61,9 +62,7 @@ import Cardano.Chain.Common (addrToBase58)
 import Cardano.Crypto.Hash.Class qualified as Crypto
 import Cardano.Ledger.BaseTypes qualified as Ledger
 import Cardano.Ledger.Credential qualified as Ledger
-import Cardano.Ledger.Crypto qualified as Ledger
 import Cardano.Ledger.Hashes qualified as Ledger
-import Cardano.Ledger.Keys qualified as Ledger
 import Control.Lens ((?~))
 import Data.Aeson.Types qualified as Aeson
 import Data.Csv qualified as Csv
@@ -74,7 +73,7 @@ import Data.Swagger.Lens qualified ()
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as TE
 import Data.Vector qualified as Vector
-import Data.Word (Word64)
+import Data.Word (Word32, Word16)
 import Database.PostgreSQL.Simple qualified as PQ
 import Database.PostgreSQL.Simple.FromField qualified as PQ (
   FromField (..),
@@ -90,7 +89,7 @@ import PlutusTx.Prelude qualified as PlutusTx
 import Text.Printf qualified as Printf
 import Web.HttpApiData qualified as Web
 
-import Cardano.Api.Address qualified as Api
+import Cardano.Api.Internal.Address qualified as Api
 import Cardano.Ledger.Api qualified as Ledger
 import GeniusYield.Imports
 import GeniusYield.Types.Credential (
@@ -239,26 +238,32 @@ addressFromPlutus nid addr =
   nid' :: Ledger.Network
   nid' = networkIdToLedger nid
 
-  credential :: Plutus.Credential -> Maybe (Ledger.Credential kr Ledger.StandardCrypto)
+  credential :: Plutus.Credential -> Maybe (Ledger.Credential kr)
   credential (Plutus.PubKeyCredential (Plutus.PubKeyHash (Plutus.BuiltinByteString bs))) = Ledger.KeyHashObj . Ledger.KeyHash <$> Crypto.hashFromBytes bs
   credential (Plutus.ScriptCredential (Plutus.ScriptHash (Plutus.BuiltinByteString bs))) = Ledger.ScriptHashObj . Ledger.ScriptHash <$> Crypto.hashFromBytes bs
 
-  paymentCredential :: Maybe (Ledger.PaymentCredential Ledger.StandardCrypto)
+  paymentCredential :: Maybe Ledger.PaymentCredential
   paymentCredential = credential $ Plutus.addressCredential addr
 
-  stakeReference :: Maybe (Ledger.StakeReference Ledger.StandardCrypto)
+  stakeReference :: Maybe Ledger.StakeReference
   stakeReference = case Plutus.addressStakingCredential addr of
     Nothing -> Just Ledger.StakeRefNull
     Just (Plutus.StakingHash c) -> Ledger.StakeRefBase <$> credential c
     Just (Plutus.StakingPtr x y z) -> Ledger.StakeRefPtr <$> ptr x y z
 
   ptr :: Integer -> Integer -> Integer -> Maybe Ledger.Ptr
-  ptr x y z = Ledger.Ptr <$> coerce integerToWord64 x <*> coerce integerToWord64 y <*> coerce integerToWord64 z
+  ptr x y z = Ledger.Ptr <$> coerce integerToWord32 x <*> coerce integerToWord16 y <*> coerce integerToWord16 z
 
-  integerToWord64 :: Integer -> Maybe Word64
-  integerToWord64 n
+  integerToWord16 :: Integer -> Maybe Word16
+  integerToWord16 n
     | n < 0 = Nothing
-    | n > toInteger (maxBound @Word64) = Nothing
+    | n > toInteger (maxBound @Word16) = Nothing
+    | otherwise = Just $ fromInteger n
+
+  integerToWord32 :: Integer -> Maybe Word32
+  integerToWord32 n
+    | n < 0 = Nothing
+    | n > toInteger (maxBound @Word32) = Nothing
     | otherwise = Just $ fromInteger n
 
 {- | If an address is a shelley address, then we'll return payment credential wrapped in `Just`, `Nothing` otherwise.
@@ -669,8 +674,11 @@ unsafeStakeAddressFromText t =
 stakeAddressToText :: GYStakeAddress -> Text.Text
 stakeAddressToText = Api.serialiseAddress . stakeAddressToApi
 
-stakeAddressToLedger :: GYStakeAddress -> Ledger.RewardAccount Ledger.StandardCrypto
+stakeAddressToLedger :: GYStakeAddress -> Ledger.RewardAccount
 stakeAddressToLedger (stakeAddressToApi -> Api.StakeAddress nw sc) = Ledger.RewardAccount nw sc
+
+stakeAddressFromLedger :: Ledger.RewardAccount -> GYStakeAddress
+stakeAddressFromLedger (Ledger.RewardAccount nw sc) = stakeAddressFromApi $ Api.StakeAddress nw sc
 
 {-# DEPRECATED stakeAddressCredential "Use stakeAddressToCredential." #-}
 
@@ -888,6 +896,9 @@ instance FromJSON GYStakeAddressBech32 where
     case stakeAddressFromTextMaybe t of
       Just stakeAddr -> return $ GYStakeAddressBech32 stakeAddr
       Nothing -> fail "cannot deserialise stake address"
+
+instance Aeson.FromJSONKey GYStakeAddressBech32 where
+  fromJSONKey = Aeson.FromJSONKeyTextParser (either (fail . Text.unpack) pure . Web.parseUrlPiece)
 
 instance PQ.ToField GYStakeAddressBech32 where
   toField (GYStakeAddressBech32 stakeAddr) = PQ.toField $ stakeAddressToText stakeAddr

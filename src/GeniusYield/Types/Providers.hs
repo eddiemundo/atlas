@@ -88,6 +88,7 @@ import Control.Concurrent.Class.MonadMVar.Strict (
  )
 import Control.Monad.IO.Class (MonadIO (..))
 import Data.Default (Default, def)
+import Data.Sequence qualified as Seq
 import Data.Text qualified as Txt
 import Data.Time
 import Data.Time.Clock.POSIX (posixSecondsToUTCTime)
@@ -98,8 +99,10 @@ import GeniusYield.TxBuilder.Errors
 import GeniusYield.Types.Address
 import GeniusYield.Types.Credential (GYCredential, GYPaymentCredential)
 import GeniusYield.Types.DRep
+import GeniusYield.Types.DataStore (GYDataStore (..), fetchFromDataStore, mkDataStoreVar)
 import GeniusYield.Types.Datum
 import GeniusYield.Types.Epoch (GYEpochNo (GYEpochNo))
+import GeniusYield.Types.Governance (GYConstitution, GYGovActionId, GYGovActionState)
 import GeniusYield.Types.KeyRole
 import GeniusYield.Types.Logging
 import GeniusYield.Types.ProtocolParameters
@@ -151,10 +154,18 @@ data GYProviders = GYProviders
   , gyGetParameters :: !GYGetParameters
   , gyQueryUTxO :: !GYQueryUTxO
   , gyGetStakeAddressInfo :: !(GYStakeAddress -> IO (Maybe GYStakeAddressInfo))
-  , gyGetDRepState :: !(GYCredential 'GYKeyRoleDRep -> IO (Maybe GYDRepState))
-  , gyGetDRepsState :: !(Set (GYCredential 'GYKeyRoleDRep) -> IO (Map (GYCredential 'GYKeyRoleDRep) (Maybe GYDRepState)))
-  , gyLog' :: !GYLogConfiguration
+  , gyGetDRepState :: GYCredential 'GYKeyRoleDRep -> IO (Maybe GYDRepState)
+  , -- Don't make this strict since it's not defined for all providers!
+    gyGetDRepsState :: Set (GYCredential 'GYKeyRoleDRep) -> IO (Map (GYCredential 'GYKeyRoleDRep) (Maybe GYDRepState))
+  , -- Don't make this strict since it's not defined for all providers!
+    gyLog' :: !GYLogConfiguration
   , gyGetStakePools :: !(IO (Set Api.S.PoolId))
+  , gyGetConstitution :: IO GYConstitution
+  , -- Don't make this strict since it's not defined for all providers!
+    gyGetProposals :: Set GYGovActionId -> IO (Seq.Seq GYGovActionState)
+  , -- Don't make this strict since it's not defined for all providers!
+    gyGetMempoolTxs :: IO [GYTx]
+    -- Don't make this strict since it's not defined for all providers!
   }
 
 gyGetSlotOfCurrentBlock :: GYProviders -> IO GYSlot
@@ -324,9 +335,6 @@ gyWaitUntilSlotDefault getSlotOfCurrentBlock s = loop
         threadDelay 100_000
         loop
 
--- | Contains the data, alongside the time after which it should be refetched.
-data GYSlotStore = GYSlotStore !UTCTime !GYSlot
-
 {- | Construct efficient 'GYSlotActions' methods by ensuring the supplied getSlotOfCurrentBlock is only made after
 a given duration of time has passed.
 
@@ -342,29 +350,14 @@ makeSlotActions t getSlotOfCurrentBlock = do
   getTime <- mkAutoUpdate defaultUpdateSettings {updateAction = getCurrentTime}
   slotRefetchTime <- addUTCTime t <$> getTime
   initSlot <- getSlotOfCurrentBlock
-  slotStoreRef <- newMVar $ GYSlotStore slotRefetchTime initSlot
-  let gcs = getSlotOfCurrentBlock' getTime slotStoreRef
+  slotStoreRef <- mkDataStoreVar $ GYDataStore slotRefetchTime t initSlot getSlotOfCurrentBlock getTime
+  let gcs = fetchFromDataStore slotStoreRef
   pure
     GYSlotActions
       { gyGetSlotOfCurrentBlock' = gcs
       , gyWaitForNextBlock' = gyWaitForNextBlockDefault gcs
       , gyWaitUntilSlot' = gyWaitUntilSlotDefault gcs
       }
- where
-  getSlotOfCurrentBlock' :: IO UTCTime -> StrictMVar IO GYSlotStore -> IO GYSlot
-  getSlotOfCurrentBlock' getTime var = do
-    -- See note: [Caching and concurrently accessible MVars].
-    modifyMVar var $ \(GYSlotStore slotRefetchTime slotData) -> do
-      now <- getTime
-      if now < slotRefetchTime
-        then do
-          -- Return unmodified.
-          pure (GYSlotStore slotRefetchTime slotData, slotData)
-        else do
-          newSlot <- getSlotOfCurrentBlock
-          newNow <- getTime
-          let newSlotRefetchTime = addUTCTime t newNow
-          pure (GYSlotStore newSlotRefetchTime newSlot, newSlot)
 
 -------------------------------------------------------------------------------
 -- Protocol parameters

@@ -10,6 +10,7 @@ module GeniusYield.Transaction.Common (
   GYBalancedTx (..),
   GYTxInDetailed (..),
   utxoFromTxInDetailed,
+  GYTxExtraConfiguration (..),
   GYBuildTxError (..),
   GYBalancingError (..),
   minimumUTxO,
@@ -19,6 +20,7 @@ module GeniusYield.Transaction.Common (
 
 import Cardano.Api qualified as Api
 import Cardano.Ledger.Coin qualified as Ledger
+import Data.Default (Default (..))
 import GeniusYield.Imports
 import GeniusYield.Transaction.CBOR
 import GeniusYield.Types.Address
@@ -74,6 +76,32 @@ data GYTxInDetailed v = GYTxInDetailed
 utxoFromTxInDetailed :: GYTxInDetailed v -> GYUTxO
 utxoFromTxInDetailed (GYTxInDetailed (GYTxIn ref _witns) addr val d ms) = GYUTxO ref addr val d ms
 
+-- | Extra configuration for transaction building.
+data GYTxExtraConfiguration v = GYTxExtraConfiguration
+  { gytxecUtxoInputMapper :: GYUTxO -> GYTxInDetailed v
+  -- ^ When coin selection selects additional UTxOs, this function is used to map them to 'GYTxInDetailed'. This in particular is useful, when inputs are selected from a contract based wallet.
+  , gytxecPreBodyContentMapper :: Api.TxBodyContent Api.BuildTx ApiEra -> Api.TxBodyContent Api.BuildTx ApiEra
+  -- ^ This function is called on the 'Api.TxBodyContent' before submitting it to 'makeTransactionBodyAutoBalanceWrapper'.
+  , gytxecPostBodyContentMapper :: Api.TxBodyContent Api.BuildTx ApiEra -> Api.TxBodyContent Api.BuildTx ApiEra
+  -- ^ This function is called on the 'Api.TxBodyContent' after submitting it to 'makeTransactionBodyAutoBalanceWrapper'.
+  }
+
+instance Default (GYTxExtraConfiguration v) where
+  def =
+    GYTxExtraConfiguration
+      { gytxecUtxoInputMapper = \GYUTxO {utxoRef, utxoAddress, utxoValue, utxoOutDatum, utxoRefScript} ->
+          GYTxInDetailed
+            { -- It is assumed the 'GYUTxOs' arg designates key wallet utxos.
+              gyTxInDet = GYTxIn utxoRef GYTxInWitnessKey
+            , gyTxInDetAddress = utxoAddress
+            , gyTxInDetValue = fst $ valueSplitSign utxoValue -- TODO: Is this split required?
+            , gyTxInDetDatum = utxoOutDatum
+            , gyTxInDetScriptRef = utxoRefScript
+            }
+      , gytxecPreBodyContentMapper = id
+      , gytxecPostBodyContentMapper = id
+      }
+
 -------------------------------------------------------------------------------
 -- Transaction Building Errors
 -------------------------------------------------------------------------------
@@ -81,7 +109,7 @@ utxoFromTxInDetailed (GYTxInDetailed (GYTxIn ref _witns) addr val d ms) = GYUTxO
 data GYBalancingError
   = GYBalancingErrorInsufficientFunds !GYValue
   | forall v. GYBalancingErrorNonPositiveTxOut !(GYTxOut v)
-  | -- | Lovelace shortfall in constructing a change output. See: "Cardano.CoinSelection.Balance.UnableToConstructChangeError"
+  | -- | Lovelace shortfall in constructing a change output. See: "GeniusYield.Transaction.CoinSelection.Balance.UnableToConstructChangeError"
     GYBalancingErrorChangeShortFall !Natural
   | -- | User wallet has no utxos to select.
     GYBalancingErrorEmptyOwnUTxOs

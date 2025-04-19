@@ -21,6 +21,11 @@ module GeniusYield.Providers.Maestro (
   maestroUtxosAtAddressesWithDatums,
   maestroUtxosAtPaymentCredentialsWithDatums,
   maestroStakeAddressInfo,
+  maestroDRepState,
+  maestroDRepsState,
+  maestroConstitution,
+  maestroProposals,
+  maestroMempoolTxs,
 ) where
 
 import Cardano.Api qualified as Api
@@ -43,6 +48,7 @@ import Data.Either.Combinators (maybeToRight)
 import Data.Int (Int64)
 import Data.Map.Strict qualified as M
 import Data.Maybe (fromJust)
+import Data.Sequence qualified as Seq
 import Data.Set qualified as Set
 import Data.Text qualified as Text
 import Data.Time qualified as Time
@@ -651,3 +657,22 @@ maestroStakeAddressInfo env saddr = do
                 , gyStakeAddressInfoAvailableRewards = fromIntegral $ Maestro.accountInfoRewardsAvailable accInfo
                 }
           else Nothing
+
+-------------------------------------------------------------------------------
+-- Governance
+-------------------------------------------------------------------------------
+
+maestroDRepState :: Maestro.MaestroEnv 'Maestro.V1 -> GYCredential 'GYKeyRoleDRep -> IO (Maybe GYDRepState)
+maestroDRepState _p _c = error "Maestro does not support fetching the DRep state"
+
+maestroDRepsState :: Maestro.MaestroEnv 'Maestro.V1 -> Set.Set (GYCredential 'GYKeyRoleDRep) -> IO (Map (GYCredential 'GYKeyRoleDRep) (Maybe GYDRepState))
+maestroDRepsState _p _cs = error "Maestro does not support fetching the DReps state"
+
+maestroConstitution :: Maestro.MaestroEnv 'Maestro.V1 -> IO GYConstitution
+maestroConstitution = error "Maestro does not support fetching the constitution"
+
+maestroProposals :: Maestro.MaestroEnv 'Maestro.V1 -> Set GYGovActionId -> IO (Seq.Seq GYGovActionState)
+maestroProposals _p _actionIds = error "Maestro does not support fetching the proposals"
+
+maestroMempoolTxs :: Maestro.MaestroEnv 'Maestro.V1 -> IO [GYTx]
+maestroMempoolTxs _p = error "Maestro does not support fetching the mempool transactions"

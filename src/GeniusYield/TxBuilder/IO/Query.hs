@@ -140,6 +140,21 @@ instance GYTxQueryMonad GYTxQueryMonadIO where
     providers <- asks envProviders
     ioToQueryMonad $ gyGetDRepsState providers dreps
 
+  constitution = do
+    logMsg mempty GYDebug "Querying Constitution"
+    providers <- asks envProviders
+    ioToQueryMonad $ gyGetConstitution providers
+
+  proposals actionIds = do
+    logMsg mempty GYDebug "Querying Proposals"
+    providers <- asks envProviders
+    ioToQueryMonad $ gyGetProposals providers actionIds
+
+  mempoolTxs = do
+    logMsg mempty GYDebug "Querying Mempool Transactions"
+    providers <- asks envProviders
+    ioToQueryMonad $ gyGetMempoolTxs providers
+
   slotConfig = do
     providers <- asks envProviders
     ioToQueryMonad $ gyGetSlotConfig providers

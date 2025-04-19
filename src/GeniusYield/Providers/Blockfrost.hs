@@ -10,6 +10,11 @@ module GeniusYield.Providers.Blockfrost (
   blockfrostSubmitTx,
   blockfrostAwaitTxConfirmed,
   blockfrostStakeAddressInfo,
+  blockfrostDRepState,
+  blockfrostDRepsState,
+  blockfrostConstitution,
+  blockfrostProposals,
+  blockfrostMempoolTxs,
   networkIdToProject,
 ) where
 
@@ -37,6 +42,7 @@ import Data.Either.Combinators (maybeToRight)
 import Data.Foldable (fold)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromJust)
+import Data.Sequence qualified as Seq
 import Data.Set qualified as Set
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text
@@ -582,6 +588,25 @@ blockfrostStakeAddressInfo p saddr = do
                 , gyStakeAddressInfoAvailableRewards = fromInteger $ lovelacesToInteger $ Blockfrost._accountInfoWithdrawableAmount accInfo
                 }
           else Nothing
+
+-------------------------------------------------------------------------------
+-- Governance
+-------------------------------------------------------------------------------
+
+blockfrostDRepState :: Blockfrost.Project -> GYCredential 'GYKeyRoleDRep -> IO (Maybe GYDRepState)
+blockfrostDRepState _p _c = error "Blockfrost SDK does not support fetching the DRep state"
+
+blockfrostDRepsState :: Blockfrost.Project -> Set.Set (GYCredential 'GYKeyRoleDRep) -> IO (Map.Map (GYCredential 'GYKeyRoleDRep) (Maybe GYDRepState))
+blockfrostDRepsState _p _cs = error "Blockfrost SDK does not support fetching the DReps state"
+
+blockfrostConstitution :: Blockfrost.Project -> IO GYConstitution
+blockfrostConstitution = error "Blockfrost does not support fetching the constitution"
+
+blockfrostProposals :: Blockfrost.Project -> Set GYGovActionId -> IO (Seq.Seq GYGovActionState)
+blockfrostProposals _p _actionIds = error "Blockfrost SDK does not support fetching the proposals"
+
+blockfrostMempoolTxs :: Blockfrost.Project -> IO [GYTx]
+blockfrostMempoolTxs _p = error "Blockfrost does not support fetching the mempool transactions" -- Blockfrost only provides transaction hashes, whereas we need complete transaction details.
 
 -------------------------------------------------------------------------------
 -- Auxiliary functions
