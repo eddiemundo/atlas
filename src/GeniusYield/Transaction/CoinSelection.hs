@@ -35,6 +35,7 @@ import GeniusYield.Transaction.CoinSelection.UTxOSelection qualified as UTxOSele
 import GeniusYield.Transaction.Common
 import GeniusYield.Types
 import GeniusYield.Utils
+import Debug.Trace (trace)
 
 {- Note: The vast majority of partial functions in this module are fine since they are localized.
 
@@ -118,6 +119,7 @@ selectInputs
       valueIn = foldMap gyTxInDetValue existingInputs <> valueFromLovelace (fromIntegral adaSource)
       valueOut = foldMap snd requiredOutputs <> valueFromLovelace (fromIntegral adaSink)
       valueMissing = missing (valueFromLovelace (fromIntegral extraLovelace) <> valueOut `valueMinus` (valueIn <> mintValue))
+      !_blah = trace (show (valueMissing, existingInputs, valueIn)) ()
     (addIns, addVal) <-
       except $
         selectInputsLegacy
