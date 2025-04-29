@@ -38,7 +38,7 @@
                   hlint = {};
                   haskell-language-server = {};
                   # ghc-lib-parser doesnt compile with anything newer
-                  fourmolu = "0.17.0.0";
+                  fourmolu = {};
                 };
                 # Non-Haskell shell tools go here
                 shell.buildInputs = with pkgs; [
@@ -53,5 +53,6 @@
         flake = pkgs.hixProject.flake {};
       in flake // {
         legacyPackages = pkgs;
+        packages.default = flake.packages."atlas-cardano:lib:atlas-cardano";
       });
 }
