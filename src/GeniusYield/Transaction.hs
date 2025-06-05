@@ -548,8 +548,8 @@ finalizeGYBalancedTx
       collateralTotalValue :: GYValue
       collateralTotalValue = foldMapUTxOs utxoValue collaterals
 
-    !ins'' = trace ("ASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDFASDF\n" <> show ins') ins'
-    !outs'' = outs'
+    !ins'' = trace ("Atlas Actual Inputs:\n" <> show ins') ins'
+    !outs'' = trace ("Atlas Actual Outputs:\n" <> show outs') outs'
 
     txMetadata :: Api.TxMetadataInEra ApiEra
     txMetadata = maybe Api.TxMetadataNone toMetaInEra mbTxMetadata
@@ -725,6 +725,7 @@ makeTransactionBodyAutoBalanceWrapper collaterals ss eh pp poolids utxos body ch
       { AlonzoScripts.exUnitsSteps = steps
       , AlonzoScripts.exUnitsMem = mem
       } = AlonzoTx.totExUnits ltx
+    !_traceTxStats = trace ("Atlas Tx Stats: " <> show (txSize, steps, mem)) ()
     txSize :: Natural =
       let
         -- This low level code is taken verbatim from here: https://github.com/IntersectMBO/cardano-ledger/blob/6db84a7b77e19af58feb2f45dfc50aa70435967b/eras/shelley/impl/src/Cardano/Ledger/Shelley/API/Wallet.hs#L475-L494, as this is what is referred by @cardano-api@ under the hood.
