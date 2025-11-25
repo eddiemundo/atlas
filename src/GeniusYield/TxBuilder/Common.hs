@@ -161,8 +161,9 @@ instance Semigroup (GYTxSkeleton v) where
     combineIns u v = do
       let (hasScriptWitnesses, hasKeyWitnesses) = partition (\GYTxIn{gyTxInWitness} ->
             gyTxInWitness & \case
-              GYTxInWitnessScript{} -> True
+              -- GYTxInWitnessScript{} -> True
               GYTxInWitnessKey{} -> False
+              _ -> True
             ) (u ++ v)
       nubBy ((==) `on` gyTxInTxOutRef) (hasScriptWitnesses ++ hasKeyWitnesses)
     -- we cannot combine redeemers, so we just pick first.
