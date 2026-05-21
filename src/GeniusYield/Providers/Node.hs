@@ -144,7 +144,7 @@ nodeMempoolTxs info = do
    where
     finaliseAcc = reverse
   getGYTx :: Api.TxInMode -> Maybe GYTx
-  getGYTx (Api.TxInMode Api.ShelleyBasedEraDijkstra tx) = Just $ txFromApi tx
+  getGYTx (Api.TxInMode Api.ShelleyBasedEraConway tx) = Just $ txFromApi tx
   getGYTx _anyOther = Nothing
 
 -------------------------------------------------------------------------------

@@ -90,7 +90,6 @@ instance GYTxUserQueryMonad GYTxBuilderMonadIO where
     addrs <- ownAddresses
     utxosToConsider <- availableUTxOs
     case lang of
-      PlutusV4 -> ifNotV1 utxosToConsider addrs
       PlutusV3 -> ifNotV1 utxosToConsider addrs
       PlutusV2 -> ifNotV1 utxosToConsider addrs
       PlutusV1 ->

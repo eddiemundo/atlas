@@ -19,77 +19,52 @@ module GeniusYield.Types.Era (
   apiPlutusScriptV1InEra,
   apiPlutusScriptV2InEra,
   apiPlutusScriptV3InEra,
-  apiPlutusScriptV4InEra,
   apiSimpleScriptInEra,
   apiSBE,
-  dijkstraMaxRefScriptSizePerBlock,
-  dijkstraMaxRefScriptSizePerTx,
-  dijkstraRefScriptCostMultiplier,
-  dijkstraRefScriptCostStride,
 ) where
 
-import Cardano.Ledger.BaseTypes qualified as Ledger
 import Cardano.Api qualified as Api.S
-import Data.Maybe (fromMaybe)
-import Data.Word (Word32)
 
 -- TODO: Make this module internal.
-type ApiEra = Api.S.DijkstraEra
+type ApiEra = Api.S.ConwayEra
 
 type ApiLedgerEra = Api.S.ShelleyLedgerEra ApiEra
 
 apiAsType :: Api.S.AsType ApiEra
-apiAsType = Api.S.AsDijkstraEra
+apiAsType = Api.S.AsConwayEra
 
 apiCardanoEra :: Api.S.CardanoEra ApiEra
-apiCardanoEra = Api.S.DijkstraEra
+apiCardanoEra = Api.S.ConwayEra
 
 apiSBE :: Api.S.ShelleyBasedEra ApiEra
-apiSBE = Api.S.ShelleyBasedEraDijkstra
+apiSBE = Api.S.ShelleyBasedEraConway
 
 apiAnyShelleyBasedEra :: Api.S.AnyShelleyBasedEra
 apiAnyShelleyBasedEra = Api.S.AnyShelleyBasedEra apiSBE
 
 apiMaryEraOnwards :: Api.S.MaryEraOnwards ApiEra
-apiMaryEraOnwards = Api.S.MaryEraOnwardsDijkstra
+apiMaryEraOnwards = Api.S.MaryEraOnwardsConway
 
 apiAllegraEraOnwards :: Api.S.AllegraEraOnwards ApiEra
-apiAllegraEraOnwards = Api.S.AllegraEraOnwardsDijkstra
+apiAllegraEraOnwards = Api.S.AllegraEraOnwardsConway
 
 apiAlonzoEraOnwards :: Api.S.AlonzoEraOnwards ApiEra
-apiAlonzoEraOnwards = Api.S.AlonzoEraOnwardsDijkstra
+apiAlonzoEraOnwards = Api.S.AlonzoEraOnwardsConway
 
 apiBabbageEraOnwards :: Api.S.BabbageEraOnwards ApiEra
-apiBabbageEraOnwards = Api.S.BabbageEraOnwardsDijkstra
+apiBabbageEraOnwards = Api.S.BabbageEraOnwardsConway
 
 apiConwayEraOnwards :: Api.S.ConwayEraOnwards ApiEra
-apiConwayEraOnwards = Api.S.ConwayEraOnwardsDijkstra
+apiConwayEraOnwards = Api.S.ConwayEraOnwardsConway
 
 apiSimpleScriptInEra :: Api.S.ScriptLanguageInEra Api.S.SimpleScript' ApiEra
-apiSimpleScriptInEra = Api.S.SimpleScriptInDijkstra
+apiSimpleScriptInEra = Api.S.SimpleScriptInConway
 
 apiPlutusScriptV1InEra :: Api.S.ScriptLanguageInEra Api.S.PlutusScriptV1 ApiEra
-apiPlutusScriptV1InEra = Api.S.PlutusScriptV1InDijkstra
+apiPlutusScriptV1InEra = Api.S.PlutusScriptV1InConway
 
 apiPlutusScriptV2InEra :: Api.S.ScriptLanguageInEra Api.S.PlutusScriptV2 ApiEra
-apiPlutusScriptV2InEra = Api.S.PlutusScriptV2InDijkstra
+apiPlutusScriptV2InEra = Api.S.PlutusScriptV2InConway
 
 apiPlutusScriptV3InEra :: Api.S.ScriptLanguageInEra Api.S.PlutusScriptV3 ApiEra
-apiPlutusScriptV3InEra = Api.S.PlutusScriptV3InDijkstra
-
-apiPlutusScriptV4InEra :: Api.S.ScriptLanguageInEra Api.S.PlutusScriptV4 ApiEra
-apiPlutusScriptV4InEra = Api.S.PlutusScriptV4InDijkstra
-
-dijkstraMaxRefScriptSizePerBlock :: Word32
-dijkstraMaxRefScriptSizePerBlock = 1048576
-
-dijkstraMaxRefScriptSizePerTx :: Word32
-dijkstraMaxRefScriptSizePerTx = 204800
-
-dijkstraRefScriptCostStride :: Ledger.NonZero Word32
-dijkstraRefScriptCostStride = Ledger.unsafeNonZero 25600
-
-dijkstraRefScriptCostMultiplier :: Ledger.PositiveInterval
-dijkstraRefScriptCostMultiplier =
-  fromMaybe (error "dijkstraRefScriptCostMultiplier: 1.2 is out of bounds") $
-    Ledger.boundRational 1.2
+apiPlutusScriptV3InEra = Api.S.PlutusScriptV3InConway

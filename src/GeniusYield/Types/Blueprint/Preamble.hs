@@ -45,7 +45,6 @@ instance FromJSON Preamble where
       "v1" -> pure PlutusV1
       "v2" -> pure PlutusV2
       "v3" -> pure PlutusV3
-      "v4" -> pure PlutusV4
       _ -> fail "Invalid Plutus version"
 
 instance ToJSON Preamble where
@@ -62,4 +61,3 @@ instance ToJSON Preamble where
       PlutusV1 -> "v1"
       PlutusV2 -> "v2"
       PlutusV3 -> "v3"
-      PlutusV4 -> "v4"

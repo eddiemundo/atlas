@@ -114,7 +114,7 @@ import Cardano.Api qualified as CApi.S
 import Cardano.Ledger.Alonzo.Scripts qualified as Ledger
 import Cardano.Ledger.Alonzo.TxWits qualified as Ledger
 import Cardano.Ledger.Api qualified as Ledger
-import Cardano.Ledger.Dijkstra.Scripts qualified as Ledger
+import Cardano.Ledger.Conway.Scripts qualified as Ledger
 import Cardano.Ledger.Plutus.Language qualified as Ledger
 import Control.Lens ((^.))
 import Control.Monad (zipWithM)
@@ -1170,7 +1170,7 @@ obtainTxBodyContentBuildTx' (txBodyToApi -> txBody@(CApi.ShelleyTxBody _sbe _ltx
     forall witRole.
     Map GYScriptHash (GYTxOutRef, GYAnyScript) ->
     GYScriptHash ->
-    Ledger.DijkstraPlutusPurpose Ledger.AsIx ApiLedgerEra ->
+    Ledger.ConwayPlutusPurpose Ledger.AsIx ApiLedgerEra ->
     CApi.ScriptDatum witRole ->
     m (CApi.BuildTxWith CApi.BuildTx (CApi.ScriptWitness witRole ApiEra))
   resolveScriptWitness refScripts sh purp dat = do
@@ -1183,10 +1183,9 @@ obtainTxBodyContentBuildTx' (txBodyToApi -> txBody@(CApi.ShelleyTxBody _sbe _ltx
             pure $ CApi.BuildTxWith $ CApi.SimpleScriptWitness apiSimpleScriptInEra $ CApi.SScript (CApi.fromAllegraTimelock ts)
           Just (Ledger.PlutusScript ps) -> do
             plutusWitness <- case ps of
-              Ledger.DijkstraPlutusV1 ps' -> pure $ Ledger.plutusBinary ps' & Ledger.unPlutusBinary & scriptFromSerialisedScript @'PlutusV1 & scriptToApiPlutusScriptWitness
-              Ledger.DijkstraPlutusV2 ps' -> pure $ Ledger.plutusBinary ps' & Ledger.unPlutusBinary & scriptFromSerialisedScript @'PlutusV2 & scriptToApiPlutusScriptWitness
-              Ledger.DijkstraPlutusV3 ps' -> pure $ Ledger.plutusBinary ps' & Ledger.unPlutusBinary & scriptFromSerialisedScript @'PlutusV3 & scriptToApiPlutusScriptWitness
-              Ledger.DijkstraPlutusV4 ps' -> pure $ Ledger.plutusBinary ps' & Ledger.unPlutusBinary & scriptFromSerialisedScript @'PlutusV4 & scriptToApiPlutusScriptWitness
+              Ledger.ConwayPlutusV1 ps' -> pure $ Ledger.plutusBinary ps' & Ledger.unPlutusBinary & scriptFromSerialisedScript @'PlutusV1 & scriptToApiPlutusScriptWitness
+              Ledger.ConwayPlutusV2 ps' -> pure $ Ledger.plutusBinary ps' & Ledger.unPlutusBinary & scriptFromSerialisedScript @'PlutusV2 & scriptToApiPlutusScriptWitness
+              Ledger.ConwayPlutusV3 ps' -> pure $ Ledger.plutusBinary ps' & Ledger.unPlutusBinary & scriptFromSerialisedScript @'PlutusV3 & scriptToApiPlutusScriptWitness
             pure $ CApi.BuildTxWith $ plutusWitness dat red exUnits
       Just (ref, as) -> pure $
         CApi.BuildTxWith $
@@ -1206,7 +1205,7 @@ obtainTxBodyContentBuildTx' (txBodyToApi -> txBody@(CApi.ShelleyTxBody _sbe _ltx
     GYCredential kr ->
     CApi.KeyWitnessInCtx witRole ->
     CApi.ScriptWitnessInCtx witRole ->
-    Ledger.DijkstraPlutusPurpose Ledger.AsIx ApiLedgerEra ->
+    Ledger.ConwayPlutusPurpose Ledger.AsIx ApiLedgerEra ->
     CApi.ScriptDatum witRole ->
     m (CApi.BuildTxWith CApi.BuildTx (CApi.Witness witRole ApiEra))
   resolveKeyAndScriptWitness refScripts cred keyWitFor scriptWitFor purp dat = case cred of
@@ -1220,7 +1219,7 @@ obtainTxBodyContentBuildTx' (txBodyToApi -> txBody@(CApi.ShelleyTxBody _sbe _ltx
         (fromJust $ addressToPaymentCredential $ utxoAddress utxo)
         CApi.KeyWitnessForSpending
         CApi.ScriptWitnessForSpending
-        (Ledger.DijkstraSpending (Ledger.AsIx ix)) -- Only used if it's a script based credential.
+        (Ledger.ConwaySpending (Ledger.AsIx ix)) -- Only used if it's a script based credential.
         ( case utxoOutDatum utxo of
             GYOutDatumInline _ -> CApi.InlineScriptDatum
             GYOutDatumNone -> CApi.ScriptDatumForTxIn Nothing
@@ -1238,7 +1237,7 @@ obtainTxBodyContentBuildTx' (txBodyToApi -> txBody@(CApi.ShelleyTxBody _sbe _ltx
         (stakeAddressToCredential (stakeAddressFromApi stakeAddr))
         CApi.KeyWitnessForStakeAddr
         CApi.ScriptWitnessForStakeAddr
-        (Ledger.DijkstraRewarding (Ledger.AsIx ix))
+        (Ledger.ConwayRewarding (Ledger.AsIx ix))
         CApi.NoScriptDatumForStake
     pure
       ( stakeAddr
@@ -1256,7 +1255,7 @@ obtainTxBodyContentBuildTx' (txBodyToApi -> txBody@(CApi.ShelleyTxBody _sbe _ltx
         scred
         CApi.KeyWitnessForStakeAddr
         CApi.ScriptWitnessForStakeAddr
-        (Ledger.DijkstraCertifying (Ledger.AsIx ix))
+        (Ledger.ConwayCertifying (Ledger.AsIx ix))
         CApi.NoScriptDatumForStake
     pure
       ( cert
@@ -1268,7 +1267,7 @@ obtainTxBodyContentBuildTx' (txBodyToApi -> txBody@(CApi.ShelleyTxBody _sbe _ltx
       resolveScriptWitness
         refScripts
         (CApi.unPolicyId pid & scriptHashFromApi)
-        (Ledger.DijkstraMinting (Ledger.AsIx ix))
+        (Ledger.ConwayMinting (Ledger.AsIx ix))
         CApi.NoScriptDatumForMint
     pure
       ( pid

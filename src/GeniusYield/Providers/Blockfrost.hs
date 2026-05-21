@@ -29,10 +29,8 @@ import Cardano.Api qualified as Api.S
 import Cardano.Ledger.Alonzo.PParams qualified as Ledger
 import Cardano.Ledger.Compactible qualified as Compactible
 import Cardano.Ledger.Conway.PParams (
+  ConwayPParams (..),
   THKD (..),
- )
-import Cardano.Ledger.Dijkstra.PParams (
-  DijkstraPParams (..),
  )
 import Cardano.Ledger.Plutus qualified as Ledger
 import Cardano.Slotting.Slot qualified as CSlot
@@ -422,30 +420,30 @@ blockfrostProtocolParams proj = do
       >>= handleBlockfrostError "ProtocolParams"
   pure $
     Ledger.PParams $
-      DijkstraPParams
-        { dppTxFeePerByte = THKD $ Api.L.CoinPerByte $ Compactible.toCompactPartial $ Ledger.Coin _protocolParamsMinFeeA
-        , dppTxFeeFixed = THKD $ Compactible.toCompactPartial $ Ledger.Coin _protocolParamsMinFeeB
-        , dppMaxBBSize = THKD $ fromIntegral _protocolParamsMaxBlockSize
-        , dppMaxTxSize = THKD $ fromIntegral _protocolParamsMaxTxSize
-        , dppMaxBHSize = THKD $ fromIntegral _protocolParamsMaxBlockHeaderSize
-        , dppKeyDeposit = THKD $ Compactible.toCompactPartial $ Ledger.Coin $ lovelacesToInteger _protocolParamsKeyDeposit
-        , dppPoolDeposit = THKD $ Compactible.toCompactPartial $ Ledger.Coin $ lovelacesToInteger _protocolParamsPoolDeposit
-        , dppEMax =
+      ConwayPParams
+        { cppTxFeePerByte = THKD $ Api.L.CoinPerByte $ Compactible.toCompactPartial $ Ledger.Coin _protocolParamsMinFeeA
+        , cppTxFeeFixed = THKD $ Compactible.toCompactPartial $ Ledger.Coin _protocolParamsMinFeeB
+        , cppMaxBBSize = THKD $ fromIntegral _protocolParamsMaxBlockSize
+        , cppMaxTxSize = THKD $ fromIntegral _protocolParamsMaxTxSize
+        , cppMaxBHSize = THKD $ fromIntegral _protocolParamsMaxBlockHeaderSize
+        , cppKeyDeposit = THKD $ Compactible.toCompactPartial $ Ledger.Coin $ lovelacesToInteger _protocolParamsKeyDeposit
+        , cppPoolDeposit = THKD $ Compactible.toCompactPartial $ Ledger.Coin $ lovelacesToInteger _protocolParamsPoolDeposit
+        , cppEMax =
             THKD $
               Ledger.EpochInterval . fromIntegral $
                 _protocolParamsEMax
-        , dppNOpt = THKD $ fromIntegral _protocolParamsNOpt
-        , dppA0 = THKD $ fromMaybe (error "GeniusYield.Providers.Blockfrost.blockfrostProtocolParams: pool influence received from Blockfrost is out of bounds") $ Ledger.boundRational _protocolParamsA0
-        , dppRho = THKD $ fromMaybe (error "GeniusYield.Providers.Blockfrost.blockfrostProtocolParams: monetory expansion parameter received from Blockfrost is out of bounds") $ Ledger.boundRational _protocolParamsRho
-        , dppTau = THKD $ fromMaybe (error "GeniusYield.Providers.Blockfrost.blockfrostProtocolParams: treasury expansion parameter received from Blockfrost is out of bounds") $ Ledger.boundRational _protocolParamsTau
-        , dppProtocolVersion =
+        , cppNOpt = THKD $ fromIntegral _protocolParamsNOpt
+        , cppA0 = THKD $ fromMaybe (error "GeniusYield.Providers.Blockfrost.blockfrostProtocolParams: pool influence received from Blockfrost is out of bounds") $ Ledger.boundRational _protocolParamsA0
+        , cppRho = THKD $ fromMaybe (error "GeniusYield.Providers.Blockfrost.blockfrostProtocolParams: monetory expansion parameter received from Blockfrost is out of bounds") $ Ledger.boundRational _protocolParamsRho
+        , cppTau = THKD $ fromMaybe (error "GeniusYield.Providers.Blockfrost.blockfrostProtocolParams: treasury expansion parameter received from Blockfrost is out of bounds") $ Ledger.boundRational _protocolParamsTau
+        , cppProtocolVersion =
             Ledger.ProtVer
               { Ledger.pvMajor = Ledger.mkVersion _protocolParamsProtocolMajorVer & fromMaybe (error "GeniusYield.Providers.Blockfrost.blockfrostProtocolParams: major version received from Blockfrost is out of bounds")
               , Ledger.pvMinor = fromIntegral _protocolParamsProtocolMinorVer
               }
-        , dppMinPoolCost = THKD $ Compactible.toCompactPartial $ Ledger.Coin $ lovelacesToInteger _protocolParamsMinPoolCost
-        , dppCoinsPerUTxOByte = THKD $ Api.L.CoinPerByte $ Compactible.toCompactPartial $ Ledger.Coin $ lovelacesToInteger _protocolParamsCoinsPerUtxoSize
-        , dppCostModels =
+        , cppMinPoolCost = THKD $ Compactible.toCompactPartial $ Ledger.Coin $ lovelacesToInteger _protocolParamsMinPoolCost
+        , cppCoinsPerUTxOByte = THKD $ Api.L.CoinPerByte $ Compactible.toCompactPartial $ Ledger.Coin $ lovelacesToInteger _protocolParamsCoinsPerUtxoSize
+        , cppCostModels =
             THKD $
               Ledger.mkCostModels $
                 Map.fromList $
@@ -459,8 +457,8 @@ blockfrostProtocolParams proj = do
                     )
                     []
                     (Blockfrost.unCostModelsRaw _protocolParamsCostModelsRaw)
-        , dppPrices = THKD $ Ledger.Prices {Ledger.prSteps = fromMaybe (error (errPath <> "Couldn't bound Blockfrost's cpu steps")) $ Ledger.boundRational _protocolParamsPriceStep, Ledger.prMem = fromMaybe (error (errPath <> "Couldn't bound Blockfrost's memory units")) $ Ledger.boundRational _protocolParamsPriceMem}
-        , dppMaxTxExUnits =
+        , cppPrices = THKD $ Ledger.Prices {Ledger.prSteps = fromMaybe (error (errPath <> "Couldn't bound Blockfrost's cpu steps")) $ Ledger.boundRational _protocolParamsPriceStep, Ledger.prMem = fromMaybe (error (errPath <> "Couldn't bound Blockfrost's memory units")) $ Ledger.boundRational _protocolParamsPriceMem}
+        , cppMaxTxExUnits =
             THKD $
               Ledger.OrdExUnits $
                 Ledger.ExUnits
@@ -469,7 +467,7 @@ blockfrostProtocolParams proj = do
                   , Ledger.exUnitsMem =
                       fromInteger $ Blockfrost.unQuantity _protocolParamsMaxTxExMem
                   }
-        , dppMaxBlockExUnits =
+        , cppMaxBlockExUnits =
             THKD $
               Ledger.OrdExUnits $
                 Ledger.ExUnits
@@ -478,10 +476,10 @@ blockfrostProtocolParams proj = do
                   , Ledger.exUnitsMem =
                       fromInteger $ Blockfrost.unQuantity _protocolParamsMaxBlockExMem
                   }
-        , dppMaxValSize = THKD $ fromIntegral $ Blockfrost.unQuantity _protocolParamsMaxValSize
-        , dppCollateralPercentage = THKD $ fromIntegral _protocolParamsCollateralPercent
-        , dppMaxCollateralInputs = THKD $ fromIntegral _protocolParamsMaxCollateralInputs
-        , dppPoolVotingThresholds =
+        , cppMaxValSize = THKD $ fromIntegral $ Blockfrost.unQuantity _protocolParamsMaxValSize
+        , cppCollateralPercentage = THKD $ fromIntegral _protocolParamsCollateralPercent
+        , cppMaxCollateralInputs = THKD $ fromIntegral _protocolParamsMaxCollateralInputs
+        , cppPoolVotingThresholds =
             THKD $
               Ledger.PoolVotingThresholds
                 { pvtPPSecurityGroup = unsafeBoundRational $ fj _protocolParamsPvtppSecurityGroup
@@ -490,7 +488,7 @@ blockfrostProtocolParams proj = do
                 , pvtCommitteeNormal = unsafeBoundRational $ fj _protocolParamsPvtCommitteeNormal
                 , pvtCommitteeNoConfidence = unsafeBoundRational $ fj _protocolParamsPvtCommitteeNoConfidence
                 }
-        , dppDRepVotingThresholds =
+        , cppDRepVotingThresholds =
             THKD $
               Ledger.DRepVotingThresholds
                 { dvtUpdateToConstitution = unsafeBoundRational $ fj _protocolParamsDvtUpdateToConstitution
@@ -504,17 +502,13 @@ blockfrostProtocolParams proj = do
                 , dvtCommitteeNormal = unsafeBoundRational $ fj _protocolParamsDvtCommitteeNormal
                 , dvtCommitteeNoConfidence = unsafeBoundRational $ fj _protocolParamsDvtCommitteeNoConfidence
                 }
-        , dppCommitteeMinSize = THKD $ fromIntegral $ unQuantity $ fj _protocolParamsCommitteeMinSize
-        , dppCommitteeMaxTermLength = THKD (Ledger.EpochInterval $ fromIntegral $ unQuantity $ fj _protocolParamsCommitteeMaxTermLength)
-        , dppGovActionLifetime = THKD (Ledger.EpochInterval $ fromIntegral $ unQuantity $ fj _protocolParamsGovActionLifetime)
-        , dppGovActionDeposit = THKD $ Compactible.toCompactPartial $ Ledger.Coin $ lovelacesToInteger $ fj _protocolParamsGovActionDeposit
-        , dppDRepDeposit = THKD $ Compactible.toCompactPartial $ Ledger.Coin $ lovelacesToInteger $ fj _protocolParamsDrepDeposit
-        , dppDRepActivity = THKD (Ledger.EpochInterval $ fromIntegral $ unQuantity $ fj _protocolParamsDrepActivity)
-        , dppMinFeeRefScriptCostPerByte = THKD $ unsafeBoundRational $ fj _protocolParamsMinFeeRefScriptCostPerByte
-        , dppMaxRefScriptSizePerBlock = THKD dijkstraMaxRefScriptSizePerBlock
-        , dppMaxRefScriptSizePerTx = THKD dijkstraMaxRefScriptSizePerTx
-        , dppRefScriptCostStride = THKD dijkstraRefScriptCostStride
-        , dppRefScriptCostMultiplier = THKD dijkstraRefScriptCostMultiplier
+        , cppCommitteeMinSize = THKD $ fromIntegral $ unQuantity $ fj _protocolParamsCommitteeMinSize
+        , cppCommitteeMaxTermLength = THKD (Ledger.EpochInterval $ fromIntegral $ unQuantity $ fj _protocolParamsCommitteeMaxTermLength)
+        , cppGovActionLifetime = THKD (Ledger.EpochInterval $ fromIntegral $ unQuantity $ fj _protocolParamsGovActionLifetime)
+        , cppGovActionDeposit = THKD $ Compactible.toCompactPartial $ Ledger.Coin $ lovelacesToInteger $ fj _protocolParamsGovActionDeposit
+        , cppDRepDeposit = THKD $ Compactible.toCompactPartial $ Ledger.Coin $ lovelacesToInteger $ fj _protocolParamsDrepDeposit
+        , cppDRepActivity = THKD (Ledger.EpochInterval $ fromIntegral $ unQuantity $ fj _protocolParamsDrepActivity)
+        , cppMinFeeRefScriptCostPerByte = THKD $ unsafeBoundRational $ fj _protocolParamsMinFeeRefScriptCostPerByte
         }
  where
   errPath = "GeniusYield.Providers.Blockfrost.blockfrostProtocolParams: "
