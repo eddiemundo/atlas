@@ -22,8 +22,8 @@ import GeniusYield.Imports
 
 import Cardano.Api qualified as Api
 import Cardano.Api.Ledger qualified as Ledger
-import Cardano.Api.Shelley qualified as Api
 import Cardano.Ledger.Keys qualified as Ledger
+import Data.ByteString.Char8 qualified as BS8
 import Data.Aeson.Types qualified as Aeson
 import Data.Csv qualified as Csv
 import Data.Swagger qualified as Swagger
@@ -47,7 +47,12 @@ import Text.Printf qualified as Printf
 
 newtype GYPubKeyHash = GYPubKeyHash (Api.Hash Api.PaymentKey)
   deriving stock Show
-  deriving newtype (Eq, Ord, IsString)
+  deriving newtype (Eq, Ord)
+
+instance IsString GYPubKeyHash where
+  fromString s =
+    either (error . show) GYPubKeyHash $
+      Api.deserialiseFromRawBytesHex (BS8.pack s)
 
 class AsPubKeyHash a where
   toPubKeyHash :: a -> GYPubKeyHash
@@ -135,12 +140,11 @@ Left "Error in $: RawBytesHexErrorBase16DecodeFail \"e1cbb80db89e292269aeb93ec15
 -}
 instance Aeson.FromJSON GYPubKeyHash where
   parseJSON =
-    Aeson.withText "GYPubKeyHash" $
+    Aeson.withText "GYPubKeyHash" $ \t ->
       either
         (fail . show)
         (return . GYPubKeyHash)
-        . Api.deserialiseFromRawBytesHex (Api.AsHash Api.AsPaymentKey)
-        . Text.encodeUtf8
+        $ Api.deserialiseFromRawBytesHex (Text.encodeUtf8 t)
 
 {- |
 
@@ -167,7 +171,8 @@ Right (GYPubKeyHash "e1cbb80db89e292269aeb93ec15eb963dda5176b66949fe1c2a6a38d")
 Left "RawBytesHexErrorBase16DecodeFail \"not a pubkey hash\" \"invalid bytestring size\""
 -}
 instance Csv.FromField GYPubKeyHash where
-  parseField = either (fail . show) (return . pubKeyHashFromApi) . Api.deserialiseFromRawBytesHex (Api.AsHash Api.AsPaymentKey)
+  parseField bs = either (fail . show) (return . pubKeyHashFromApi) $
+    Api.deserialiseFromRawBytesHex bs
 
 -------------------------------------------------------------------------------
 -- swagger schema

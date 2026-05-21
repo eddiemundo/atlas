@@ -24,7 +24,7 @@ module GeniusYield.TxBuilder.Common (
 
 import Cardano.Api qualified as Api
 import Cardano.Api.Ledger qualified as Ledger
-import Cardano.Api.Shelley qualified as Api.S
+import Cardano.Api qualified as Api.S
 import Cardano.Ledger.Alonzo.Core qualified as Ledger
 import Cardano.Ledger.Conway.PParams qualified as Ledger
 import Cardano.Ledger.Conway.Tx qualified as Ledger
@@ -426,7 +426,10 @@ maximumRequiredCollateralLovelace pp refScriptSize = ceiling $ fromIntegral (max
 maximumFee :: ApiProtocolParameters -> Int -> Integer
 maximumFee pp refScriptSize =
   let txFee :: Integer
-      txFee = fromIntegral $ pp ^. Ledger.ppMinFeeBL + (pp ^. Ledger.ppMinFeeAL) * fromIntegral (pp ^. Ledger.ppMaxTxSizeL)
+      txFee = fixedFee + feePerByte * fromIntegral (pp ^. Ledger.ppMaxTxSizeL)
+       where
+        fixedFee = Ledger.unCoin $ pp ^. Ledger.ppTxFeeFixedL
+        feePerByte = Ledger.unCoin $ Ledger.fromCompact $ Ledger.unCoinPerByte $ pp ^. Ledger.ppTxFeePerByteL
       executionFee :: Rational
       executionFee =
         case (pp ^. Ledger.ppPricesL, pp ^. Ledger.ppMaxTxExUnitsL) of

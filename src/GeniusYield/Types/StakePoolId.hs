@@ -21,7 +21,6 @@ module GeniusYield.Types.StakePoolId (
 
 import Cardano.Api qualified as Api
 import Cardano.Api.Ledger qualified as Ledger
-import Cardano.Api.Shelley qualified as Api
 import Control.Lens ((?~))
 import Data.Aeson.Types qualified as Aeson
 import Data.Swagger qualified as Swagger
@@ -82,7 +81,7 @@ Just (GYKeyHash (GYKeyRoleStakePool) "c485ab20bd3f105e59f3c50a0d3fbaf615a51f70a1
 Nothing
 -}
 stakePoolIdFromTextMaybe :: Text.Text -> Maybe GYStakePoolId
-stakePoolIdFromTextMaybe t = case Api.deserialiseFromBech32 (Api.AsHash Api.AsStakePoolKey) t of
+stakePoolIdFromTextMaybe t = case Api.deserialiseFromBech32 t of
   Left _ -> Nothing
   Right h -> Just $ stakePoolIdFromApi h
 

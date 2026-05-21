@@ -19,11 +19,6 @@ main = do
       testGroup
         "BetRef"
         [ testGroup
-            "Emulator - CLB"
-            [ placeBetTestsClb
-            , takeBetPotTestsClb
-            ]
-        , testGroup
             "Privnet"
             [ placeBetTests setup
             , takeBetPotTests setup

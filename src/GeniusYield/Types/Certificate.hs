@@ -11,15 +11,18 @@ module GeniusYield.Types.Certificate (
   finaliseCert,
   certificateToApi,
   certificateFromApiMaybe,
+  certificateFromApiExperimentalMaybe,
   certificateToStakeCredential,
 ) where
 
 import Cardano.Api qualified as Api
+import Cardano.Api.Experimental.Certificate qualified as Api.Cert
 import Cardano.Ledger.Api qualified as Ledger
 import Cardano.Ledger.BaseTypes qualified as Ledger
 import Cardano.Ledger.Coin qualified as Ledger
 import Cardano.Ledger.Conway.Core qualified as Ledger
 import Cardano.Ledger.Conway.TxCert qualified as Ledger
+import Cardano.Ledger.Dijkstra.TxCert qualified as Dijkstra
 import Cardano.Ledger.Keys qualified as Ledger
 import Control.Lens ((^.))
 import GHC.Natural (Natural)
@@ -31,7 +34,6 @@ import GeniusYield.Types.Credential (
   credentialFromLedger,
   credentialToLedger,
   stakeCredentialFromLedger,
-  stakeCredentialToApi,
  )
 import GeniusYield.Types.Delegatee (
   GYDelegatee,
@@ -95,53 +97,78 @@ finaliseCert pp = \case
   Ledger.Coin ppDRepDeposit = pp ^. Ledger.ppDRepDepositL
   ppDRepDeposit' :: Natural = fromIntegral ppDRepDeposit
 
-certificateToApi :: GYCertificate -> Api.Certificate ApiEra
+certificateToApi :: GYCertificate -> Api.Cert.Certificate (Api.ShelleyLedgerEra ApiEra)
 certificateToApi = \case
   GYStakeAddressRegistrationCertificate dep sc ->
-    Api.makeStakeAddressRegistrationCertificate
-      . Api.StakeAddrRegistrationConway Api.ConwayEraOnwardsConway (fromIntegral dep)
-      $ f sc
+    Api.Cert.Certificate $
+      Dijkstra.DijkstraTxCertDeleg $
+        Dijkstra.DijkstraRegCert (credentialToLedger sc) (Ledger.Coin $ fromIntegral dep)
   GYStakeAddressDeregistrationCertificate ref sc ->
-    Api.makeStakeAddressUnregistrationCertificate
-      . Api.StakeAddrRegistrationConway Api.ConwayEraOnwardsConway (fromIntegral ref)
-      $ f sc
+    Api.Cert.Certificate $
+      Dijkstra.DijkstraTxCertDeleg $
+        Dijkstra.DijkstraUnRegCert (credentialToLedger sc) (Ledger.Coin $ fromIntegral ref)
   GYStakeAddressDelegationCertificate sc del ->
-    Api.makeStakeAddressDelegationCertificate $
-      Api.StakeDelegationRequirementsConwayOnwards Api.ConwayEraOnwardsConway (f sc) (g del)
-  GYStakeAddressRegistrationDelegationCertificate dep sc del -> Api.makeStakeAddressAndDRepDelegationCertificate Api.ConwayEraOnwardsConway (f sc) (g del) (fromIntegral dep)
-  GYDRepRegistrationCertificate dep cred manchor -> Api.makeDrepRegistrationCertificate (Api.DRepRegistrationRequirements Api.ConwayEraOnwardsConway (credentialToLedger cred) (fromIntegral dep)) (anchorToLedger <$> manchor)
-  GYDRepUpdateCertificate cred manchor -> Api.makeDrepUpdateCertificate (Api.DRepUpdateRequirements Api.ConwayEraOnwardsConway (credentialToLedger cred)) (anchorToLedger <$> manchor)
-  GYDRepUnregistrationCertificate cred refund -> Api.makeDrepUnregistrationCertificate (Api.DRepUnregistrationRequirements Api.ConwayEraOnwardsConway (credentialToLedger cred) (fromIntegral refund))
-  GYStakePoolRegistrationCertificate poolParams -> Api.makeStakePoolRegistrationCertificate (Api.StakePoolRegistrationRequirementsConwayOnwards Api.ConwayEraOnwardsConway (poolParamsToLedger poolParams))
-  GYStakePoolRetirementCertificate poolId epoch -> Api.makeStakePoolRetirementCertificate (Api.StakePoolRetirementRequirementsConwayOnwards Api.ConwayEraOnwardsConway (keyHashToApi poolId) (epochNoToLedger epoch))
-  GYCommitteeHotKeyAuthCertificate cold hot -> Api.makeCommitteeHotKeyAuthorizationCertificate (Api.CommitteeHotKeyAuthorizationRequirements Api.ConwayEraOnwardsConway (credentialToLedger cold) (credentialToLedger hot))
-  GYCommitteeColdKeyResignationCertificate cold manchor -> Api.makeCommitteeColdkeyResignationCertificate (Api.CommitteeColdkeyResignationRequirements Api.ConwayEraOnwardsConway (credentialToLedger cold) (anchorToLedger <$> manchor))
- where
-  f = stakeCredentialToApi
-  g = delegateeToLedger
+    Api.Cert.Certificate $
+      Dijkstra.DijkstraTxCertDeleg $
+        Dijkstra.DijkstraDelegCert (credentialToLedger sc) (delegateeToLedger del)
+  GYStakeAddressRegistrationDelegationCertificate dep sc del ->
+    Api.Cert.Certificate $
+      Dijkstra.DijkstraTxCertDeleg $
+        Dijkstra.DijkstraRegDelegCert (credentialToLedger sc) (delegateeToLedger del) (Ledger.Coin $ fromIntegral dep)
+  GYDRepRegistrationCertificate dep cred manchor ->
+    Api.Cert.Certificate $
+      Dijkstra.DijkstraTxCertGov $
+        Ledger.ConwayRegDRep (credentialToLedger cred) (Ledger.Coin $ fromIntegral dep) (Ledger.maybeToStrictMaybe $ anchorToLedger <$> manchor)
+  GYDRepUpdateCertificate cred manchor ->
+    Api.Cert.Certificate $
+      Dijkstra.DijkstraTxCertGov $
+        Ledger.ConwayUpdateDRep (credentialToLedger cred) (Ledger.maybeToStrictMaybe $ anchorToLedger <$> manchor)
+  GYDRepUnregistrationCertificate cred refund ->
+    Api.Cert.Certificate $
+      Dijkstra.DijkstraTxCertGov $
+        Ledger.ConwayUnRegDRep (credentialToLedger cred) (Ledger.Coin $ fromIntegral refund)
+  GYStakePoolRegistrationCertificate poolParams ->
+    Api.Cert.Certificate $
+      Dijkstra.DijkstraTxCertPool $
+        Ledger.RegPool (poolParamsToLedger poolParams)
+  GYStakePoolRetirementCertificate poolId epoch ->
+    Api.Cert.Certificate $
+      Dijkstra.DijkstraTxCertPool $
+        Ledger.RetirePool (keyHashToLedger poolId) (epochNoToLedger epoch)
+  GYCommitteeHotKeyAuthCertificate cold hot ->
+    Api.Cert.Certificate $
+      Dijkstra.DijkstraTxCertGov $
+        Ledger.ConwayAuthCommitteeHotKey (credentialToLedger cold) (credentialToLedger hot)
+  GYCommitteeColdKeyResignationCertificate cold manchor ->
+    Api.Cert.Certificate $
+      Dijkstra.DijkstraTxCertGov $
+        Ledger.ConwayResignCommitteeColdKey (credentialToLedger cold) (Ledger.maybeToStrictMaybe $ anchorToLedger <$> manchor)
 
-certificateFromApiMaybe :: Api.Certificate ApiEra -> Maybe GYCertificate
-certificateFromApiMaybe (Api.ConwayCertificate _ x) = case x of
-  Ledger.ConwayTxCertDeleg delCert -> case delCert of
-    Ledger.ConwayRegCert sc (Ledger.SJust dep) -> Just $ GYStakeAddressRegistrationCertificate (fromIntegral dep) (f sc)
-    Ledger.ConwayRegCert _ Ledger.SNothing -> Nothing
-    Ledger.ConwayUnRegCert sc (Ledger.SJust ref) -> Just $ GYStakeAddressDeregistrationCertificate (fromIntegral ref) (f sc)
-    Ledger.ConwayUnRegCert _ Ledger.SNothing -> Nothing
-    Ledger.ConwayDelegCert sc del -> Just $ GYStakeAddressDelegationCertificate (f sc) (g del)
-    Ledger.ConwayRegDelegCert sc del dep -> Just $ GYStakeAddressRegistrationDelegationCertificate (fromIntegral dep) (f sc) (g del)
-  Ledger.ConwayTxCertGov govCert -> case govCert of
+certificateFromApiMaybe :: Api.Cert.Certificate (Api.ShelleyLedgerEra ApiEra) -> Maybe GYCertificate
+certificateFromApiMaybe = certificateFromApiExperimentalMaybe
+
+certificateFromApiExperimentalMaybe :: Api.Cert.Certificate (Api.ShelleyLedgerEra ApiEra) -> Maybe GYCertificate
+certificateFromApiExperimentalMaybe (Api.Cert.Certificate x) = certificateFromDijkstraLedgerMaybe x
+
+certificateFromDijkstraLedgerMaybe :: Dijkstra.DijkstraTxCert (Api.ShelleyLedgerEra ApiEra) -> Maybe GYCertificate
+certificateFromDijkstraLedgerMaybe = \case
+  Dijkstra.DijkstraTxCertDeleg delCert -> case delCert of
+    Dijkstra.DijkstraRegCert sc dep -> Just $ GYStakeAddressRegistrationCertificate (fromIntegral dep) (f sc)
+    Dijkstra.DijkstraUnRegCert sc ref -> Just $ GYStakeAddressDeregistrationCertificate (fromIntegral ref) (f sc)
+    Dijkstra.DijkstraDelegCert sc del -> Just $ GYStakeAddressDelegationCertificate (f sc) (g del)
+    Dijkstra.DijkstraRegDelegCert sc del dep -> Just $ GYStakeAddressRegistrationDelegationCertificate (fromIntegral dep) (f sc) (g del)
+  Dijkstra.DijkstraTxCertGov govCert -> case govCert of
     Ledger.ConwayRegDRep cred dep manchor -> Just $ GYDRepRegistrationCertificate (fromIntegral dep) (credentialFromLedger cred) (Ledger.strictMaybeToMaybe (anchorFromLedger <$> manchor))
     Ledger.ConwayUpdateDRep cred manchor -> Just $ GYDRepUpdateCertificate (credentialFromLedger cred) (Ledger.strictMaybeToMaybe (anchorFromLedger <$> manchor))
     Ledger.ConwayUnRegDRep cred refund -> Just $ GYDRepUnregistrationCertificate (credentialFromLedger cred) (fromIntegral refund)
     Ledger.ConwayAuthCommitteeHotKey cold hot -> Just $ GYCommitteeHotKeyAuthCertificate (credentialFromLedger cold) (credentialFromLedger hot)
     Ledger.ConwayResignCommitteeColdKey cold manchor -> Just $ GYCommitteeColdKeyResignationCertificate (credentialFromLedger cold) (Ledger.strictMaybeToMaybe (anchorFromLedger <$> manchor))
-  Ledger.ConwayTxCertPool poolCert -> case poolCert of
+  Dijkstra.DijkstraTxCertPool poolCert -> case poolCert of
     Ledger.RegPool poolParams -> Just $ GYStakePoolRegistrationCertificate (poolParamsFromLedger poolParams)
     Ledger.RetirePool poolId epoch -> Just $ GYStakePoolRetirementCertificate (keyHashFromLedger poolId) (epochNoFromLedger epoch)
  where
   f = stakeCredentialFromLedger
   g = delegateeFromLedger
-certificateFromApiMaybe _ = Nothing
 
 -- | This casts relevant credentials to stake credentials as that's how cardano-api treats these under the hood, which is nonetheless ugly.
 certificateToStakeCredential :: GYCertificate -> GYStakeCredential

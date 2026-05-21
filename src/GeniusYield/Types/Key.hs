@@ -5,6 +5,7 @@ License     : Apache 2.0
 Maintainer  : support@geniusyield.co
 Stability   : develop
 -}
+
 module GeniusYield.Types.Key (
   ToShelleyWitnessSigningKey (..),
 
@@ -126,8 +127,6 @@ module GeniusYield.Types.Key (
 ) where
 
 import Cardano.Api qualified as Api
-import Cardano.Api.Internal.SerialiseTextEnvelope qualified as Api
-import Cardano.Api.Shelley qualified as Api
 import Cardano.Crypto.Hash.Class qualified as Crypto
 import Cardano.Crypto.Wallet qualified as Crypto.HD
 import Cardano.Ledger.Keys qualified as Ledger
@@ -312,7 +311,7 @@ writeSigningKey file key = do
     Left (err :: Api.FileError ()) -> throwIO $ userError $ show err
     Right () -> return ()
 
-readSigningKey :: forall kr. (SingGYKeyRoleI kr, Api.HasTextEnvelope (GYSigningKeyToApi kr)) => FilePath -> IO (GYSigningKey kr)
+readSigningKey :: forall kr. SingGYKeyRoleI kr => FilePath -> IO (GYSigningKey kr)
 readSigningKey fp = do
   s <- Api.readFileTextEnvelopeAnyOf asTypes (Api.File fp)
   case s of
@@ -526,19 +525,10 @@ writeExtendedSigningKey file key = do
 
 readExtendedSigningKey :: forall kr. (SingGYKeyRoleI kr, Api.HasTextEnvelope (GYExtendedSigningKeyToApi kr)) => FilePath -> IO (GYExtendedSigningKey kr)
 readExtendedSigningKey fp = do
-  s <- Api.readFileTextEnvelope asType (Api.File fp)
+  s <- Api.readFileTextEnvelope (Api.File fp)
   case s of
     Left err -> fail (show err) --- throws IOError
     Right x -> return (extendedSigningKeyFromApi x)
- where
-  asType =
-    case singGYKeyRole @kr of
-      SingGYKeyRolePayment -> Api.proxyToAsType Proxy
-      SingGYKeyRoleStaking -> Api.proxyToAsType Proxy
-      SingGYKeyRoleDRep -> Api.proxyToAsType Proxy
-      SingGYKeyRoleStakePool -> error "readExtendedSigningKey: Impossible, no API representation for extended stake pool key"
-      SingGYKeyRoleHotCommittee -> Api.proxyToAsType Proxy
-      SingGYKeyRoleColdCommittee -> Api.proxyToAsType Proxy
 
 newtype GYExtendedVerificationKey (kr :: GYKeyRole) = GYExtendedVerificationKey Crypto.HD.XPub
   deriving newtype Eq

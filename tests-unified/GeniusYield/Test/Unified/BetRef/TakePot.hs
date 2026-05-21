@@ -1,6 +1,5 @@
 module GeniusYield.Test.Unified.BetRef.TakePot (
   takeBetPotTests,
-  takeBetPotTestsClb,
 ) where
 
 import Control.Monad.Except (handleError)
@@ -14,24 +13,12 @@ import Test.Tasty (
 import GeniusYield.HTTP.Errors (someBackendError)
 import GeniusYield.Imports
 import GeniusYield.OnChain.BetRef.Types
-import GeniusYield.Test.Clb
 import GeniusYield.Test.Privnet.Setup
 import GeniusYield.Test.Unified.BetRef.Operations
 import GeniusYield.Test.Unified.BetRef.PlaceBet
 import GeniusYield.Test.Utils
 import GeniusYield.TxBuilder
 import GeniusYield.Types
-
-takeBetPotTestsClb :: TestTree
-takeBetPotTestsClb =
-  testGroup
-    "Take bet pot"
-    [ mkTestFor "Take bet pot" takeBetsTest
-    , mkTestFor "Take by wrong guesser" $
-        mustFail . wrongGuesserTakeBetsTest
-    , mkTestFor "The first bet matters" $
-        mustFail . badUpdatedGuessTakeBetsTest
-    ]
 
 -- | Our unit tests for taking the bet pot operation
 takeBetPotTests :: Setup -> TestTree

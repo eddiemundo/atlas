@@ -40,13 +40,13 @@ module GeniusYield.Types.Tx (
 ) where
 
 import Cardano.Api qualified as Api
-import Cardano.Api.Shelley qualified as Api.S
+import Cardano.Api qualified as Api.S
+import Cardano.Ledger.Alonzo.Core qualified as LedgerCore
 import Cardano.Ledger.Alonzo.TxWits (
   AlonzoTxWits,
   addrAlonzoTxWitsL,
  )
 import Cardano.Ledger.Binary qualified as CBOR
-import Cardano.Ledger.Conway qualified as Conway (ConwayEra)
 import Control.Lens (view, (?~))
 import Data.Aeson.Types qualified as Aeson
 import Data.ByteString qualified as BS
@@ -67,14 +67,13 @@ import PlutusTx.Builtins.Internal qualified as Plutus
 import Text.Printf qualified as Printf
 import Web.HttpApiData qualified as Web
 
-import Cardano.Api.Ledger qualified as Ledger
-import Cardano.Api.Shelley qualified as Api
 import Cardano.Ledger.Core (eraProtVerHigh)
 import GeniusYield.Imports
-import GeniusYield.Types.Era (ApiEra)
+import GeniusYield.Types.Era (ApiEra, ApiLedgerEra, apiAsType, apiSBE)
 import GeniusYield.Types.PlutusVersion (
   PlutusVersion (..),
   VersionIsGreater,
+  VersionIsGreaterOrEqual,
  )
 
 {- $setup
@@ -137,8 +136,8 @@ txFromApi = coerce
 txToApi :: GYTx -> Api.Tx ApiEra
 txToApi = coerce
 
-txFromLedger :: Ledger.Tx (Api.ShelleyLedgerEra ApiEra) -> GYTx
-txFromLedger = txFromApi . Api.ShelleyTx Api.ShelleyBasedEraConway
+txFromLedger :: LedgerCore.Tx LedgerCore.TopTx (Api.ShelleyLedgerEra ApiEra) -> GYTx
+txFromLedger = txFromApi . Api.ShelleyTx apiSBE
 
 instance Web.FromHttpApiData GYTx where
   parseUrlPiece t = first (T.pack . ("Not a tx, error: " ++)) $ txFromHexBS $ TE.encodeUtf8 t
@@ -166,7 +165,7 @@ txFromHexBS :: BS.ByteString -> Either String GYTx
 txFromHexBS bs = BS16.decode bs >>= txFromCBOR
 
 txFromCBOR :: BS.ByteString -> Either String GYTx
-txFromCBOR = fmap txFromApi . first show . Api.deserialiseFromCBOR (Api.AsTx Api.AsConwayEra)
+txFromCBOR = fmap txFromApi . first show . Api.deserialiseFromCBOR (Api.AsTx apiAsType)
 
 {- |
 
@@ -199,7 +198,7 @@ writeTx file tx = do
 
 data PlutusTxId (v :: PlutusVersion) where
   PlutusTxIdBeforeV3 :: PlutusV3 `VersionIsGreater` v => PlutusV1.TxId -> PlutusTxId v
-  PlutusTxIdV3 :: PlutusV3.TxId -> PlutusTxId 'PlutusV3
+  PlutusTxIdV3 :: VersionIsGreaterOrEqual v 'PlutusV3 => PlutusV3.TxId -> PlutusTxId v
 
 -- | Transaction hash/id of a particular transaction.
 newtype GYTxId = GYTxId Api.TxId
@@ -275,7 +274,10 @@ txIdFromHex :: String -> Maybe GYTxId
 txIdFromHex = rightToMaybe . txIdFromHexE
 
 txIdFromHexE :: String -> Either String GYTxId
-txIdFromHexE = coerce . first show . Api.deserialiseFromRawBytesHex (Api.proxyToAsType @Api.TxId Proxy) . BS8.pack
+txIdFromHexE s =
+  first show $
+    GYTxId <$>
+    Api.deserialiseFromRawBytesHex (BS8.pack s)
 
 txIdToApi :: GYTxId -> Api.TxId
 txIdToApi = coerce
@@ -288,7 +290,7 @@ txIdFromPlutus (PlutusTxIdBeforeV3 (PlutusV1.TxId (Plutus.BuiltinByteString bs))
 txIdFromPlutus (PlutusTxIdV3 (PlutusV3.TxId (Plutus.BuiltinByteString bs))) = txIdFromApi <$> Api.deserialiseFromRawBytes Api.AsTxId bs
 
 -- | Wrapper around transaction witness set. Note that Babbage ledger also uses the same @TxWitness@ type defined in Alonzo ledger, which was updated for Plutus-V2 scripts and same is expected for Plutus-V3.
-newtype GYTxWitness = GYTxWitness (AlonzoTxWits Conway.ConwayEra)
+newtype GYTxWitness = GYTxWitness (AlonzoTxWits ApiLedgerEra)
   deriving newtype (Show, Eq, Semigroup, Monoid)
 
 instance Swagger.ToSchema GYTxWitness where
@@ -314,16 +316,16 @@ instance Web.FromHttpApiData GYTxWitness where
 txWitFromHexBS :: BS.ByteString -> Either String GYTxWitness
 txWitFromHexBS bs = do
   bs' <- BS16.decode bs
-  txWit <- first show $ CBOR.decodeFullAnnotator (eraProtVerHigh @Conway.ConwayEra) "Reading transaction witness set" CBOR.decCBOR (LBS.fromStrict bs')
+  txWit <- first show $ CBOR.decodeFullAnnotator (eraProtVerHigh @ApiLedgerEra) "Reading transaction witness set" CBOR.decCBOR (LBS.fromStrict bs')
   return (GYTxWitness txWit)
 
 txWitFromHex :: String -> Maybe GYTxWitness
 txWitFromHex = rightToMaybe . txWitFromHexBS . TE.encodeUtf8 . fromString
 
-txWitFromLedger :: AlonzoTxWits Conway.ConwayEra -> GYTxWitness
+txWitFromLedger :: AlonzoTxWits ApiLedgerEra -> GYTxWitness
 txWitFromLedger = coerce
 
-txWitToLedger :: GYTxWitness -> AlonzoTxWits Conway.ConwayEra
+txWitToLedger :: GYTxWitness -> AlonzoTxWits ApiLedgerEra
 txWitToLedger = coerce
 
 -- `txWitCbor` is the cbor obtained using CIP-30 compatible wallet's `api.signTx`.
@@ -343,4 +345,4 @@ txWitToLedger = coerce
 
 -- | Obtain `vkeywitness` as cddl calls it to make our unsigned transaction, signed (see `makeSignedTransaction` method).
 txWitToKeyWitnessApi :: GYTxWitness -> [Api.S.KeyWitness ApiEra]
-txWitToKeyWitnessApi = fmap (Api.S.ShelleyKeyWitness Api.ShelleyBasedEraConway) . Set.toList . view addrAlonzoTxWitsL . txWitToLedger
+txWitToKeyWitnessApi = fmap (Api.S.ShelleyKeyWitness apiSBE) . Set.toList . view addrAlonzoTxWitsL . txWitToLedger

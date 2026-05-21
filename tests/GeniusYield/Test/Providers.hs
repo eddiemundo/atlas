@@ -343,19 +343,19 @@ mockScriptDataDetailed = fromJust $ Aeson.decode "{\"fields\": [{\"fields\": [{\
 maestroAssetFromLovelace :: Integer -> Maestro.Asset
 maestroAssetFromLovelace n =
   Maestro.Asset
-    { assetAmount = fromIntegral n
+    { assetAmount = n
     , assetUnit = Maestro.Lovelace
     }
 
 maestroAssetSingleton :: GYAssetClass -> Integer -> Maestro.Asset
 maestroAssetSingleton GYLovelace n =
   Maestro.Asset
-    { assetAmount = fromIntegral n
+    { assetAmount = n
     , assetUnit = Maestro.Lovelace
     }
 maestroAssetSingleton (GYToken policyId tokenName) n =
   Maestro.Asset
-    { assetAmount = fromIntegral n
+    { assetAmount = n
     , assetUnit = Maestro.UserMintedToken (Maestro.NonAdaNativeToken (coerce $ mintingPolicyIdToText policyId) (coerce $ tokenNameToHex tokenName))
     }
 

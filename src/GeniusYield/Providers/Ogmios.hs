@@ -1,3 +1,5 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
+
 {- |
 Module      : GeniusYield.Providers.Ogmios
 Description : Ogmios provider for remote node connection.
@@ -28,12 +30,14 @@ module GeniusYield.Providers.Ogmios (
 import Cardano.Api qualified as Api
 import Cardano.Api.Ledger qualified as Api.L
 import Cardano.Api.Ledger qualified as Ledger
-import Cardano.Api.Shelley qualified as Api.S
+import Cardano.Api qualified as Api.S
 import Cardano.Ledger.Alonzo.PParams qualified as Ledger
-import Cardano.Ledger.Conway qualified as Conway
+import Cardano.Ledger.Compactible qualified as Compactible
 import Cardano.Ledger.Conway.PParams (
-  ConwayPParams (..),
   THKD (..),
+ )
+import Cardano.Ledger.Dijkstra.PParams (
+  DijkstraPParams (..),
  )
 import Cardano.Ledger.Core qualified as Ledger
 import Cardano.Ledger.HKD (HKD, HKDFunctor (..))
@@ -664,6 +668,15 @@ deriving via (CustomJSON '[FieldLabelModifier '[StripPrefix "protocolParameters"
 deriving instance Eq ProtocolParametersM
 deriving instance Show ProtocolParametersM
 
+class HKDFunctor f => DijkstraPParamDefaults f where
+  dijkstraPParamDefault :: a -> HKD f a
+
+instance DijkstraPParamDefaults Identity where
+  dijkstraPParamDefault = id
+
+instance DijkstraPParamDefaults Ledger.StrictMaybe where
+  dijkstraPParamDefault _ = Ledger.SNothing
+
 protocolVersionFromOgmios :: String -> ProtocolVersion -> Ledger.ProtVer
 protocolVersionFromOgmios errPath protocolParametersVersion =
   Ledger.ProtVer
@@ -671,17 +684,17 @@ protocolVersionFromOgmios errPath protocolParametersVersion =
     , Ledger.pvMinor = Maestro.protocolVersionMinor protocolParametersVersion
     }
 
-pparamsFromOgmios :: forall f. HKDFunctor f => String -> ProtocolParametersHKD f -> ConwayPParams f Conway.ConwayEra
+pparamsFromOgmios :: forall f. DijkstraPParamDefaults f => String -> ProtocolParametersHKD f -> DijkstraPParams f ApiLedgerEra
 pparamsFromOgmios errPath ProtocolParameters {..} =
-  ConwayPParams
-    { cppMinFeeA = THKD $ hkdMap prxy (Ledger.Coin . (toInteger @Natural)) protocolParametersMinFeeCoefficient
-    , cppMinFeeB = THKD $ hkdMap prxy (Ledger.Coin . toInteger . Maestro.asLovelaceLovelace . Maestro.asAdaAda) protocolParametersMinFeeConstant
-    , cppMaxBBSize = THKD $ hkdMap prxy ((fromIntegral @Natural @Word32) . Maestro.asBytesBytes) protocolParametersMaxBlockBodySize
-    , cppMaxTxSize = THKD $ hkdMap prxy ((fromIntegral @Natural @Word32) . Maestro.asBytesBytes) protocolParametersMaxTransactionSize
-    , cppMaxBHSize = THKD $ hkdMap prxy (fromIntegral @Natural @Word16 . Maestro.asBytesBytes) protocolParametersMaxBlockHeaderSize
-    , cppKeyDeposit = THKD $ hkdMap prxy (Ledger.Coin . toInteger . Maestro.asLovelaceLovelace . Maestro.asAdaAda) protocolParametersStakeCredentialDeposit
-    , cppPoolDeposit = THKD $ hkdMap prxy (Ledger.Coin . toInteger . Maestro.asLovelaceLovelace . Maestro.asAdaAda) protocolParametersStakePoolDeposit
-    , cppEMax =
+  DijkstraPParams
+    { dppTxFeePerByte = THKD $ hkdMap prxy (Api.L.CoinPerByte . Compactible.toCompactPartial . Ledger.Coin . (toInteger @Natural)) protocolParametersMinFeeCoefficient
+    , dppTxFeeFixed = THKD $ hkdMap prxy (Compactible.toCompactPartial . Ledger.Coin . toInteger . Maestro.asLovelaceLovelace . Maestro.asAdaAda) protocolParametersMinFeeConstant
+    , dppMaxBBSize = THKD $ hkdMap prxy ((fromIntegral @Natural @Word32) . Maestro.asBytesBytes) protocolParametersMaxBlockBodySize
+    , dppMaxTxSize = THKD $ hkdMap prxy ((fromIntegral @Natural @Word32) . Maestro.asBytesBytes) protocolParametersMaxTransactionSize
+    , dppMaxBHSize = THKD $ hkdMap prxy (fromIntegral @Natural @Word16 . Maestro.asBytesBytes) protocolParametersMaxBlockHeaderSize
+    , dppKeyDeposit = THKD $ hkdMap prxy (Compactible.toCompactPartial . Ledger.Coin . toInteger . Maestro.asLovelaceLovelace . Maestro.asAdaAda) protocolParametersStakeCredentialDeposit
+    , dppPoolDeposit = THKD $ hkdMap prxy (Compactible.toCompactPartial . Ledger.Coin . toInteger . Maestro.asLovelaceLovelace . Maestro.asAdaAda) protocolParametersStakePoolDeposit
+    , dppEMax =
         THKD $
           hkdMap
             prxy
@@ -690,14 +703,14 @@ pparamsFromOgmios errPath ProtocolParameters {..} =
                 . Maestro.unEpochNo
             )
             protocolParametersStakePoolRetirementEpochBound
-    , cppNOpt = THKD $ hkdMap prxy (fromIntegral @Natural @Word16) protocolParametersDesiredNumberOfStakePools
-    , cppA0 = THKD $ hkdMap prxy (fromMaybe (error (errPath <> "Pool influence received from Maestro is out of bounds")) . Ledger.boundRational @Ledger.NonNegativeInterval . Maestro.unMaestroRational) protocolParametersStakePoolPledgeInfluence
-    , cppRho = THKD $ hkdMap prxy (fromMaybe (error (errPath <> "Monetory expansion parameter received from Maestro is out of bounds")) . Ledger.boundRational @Ledger.UnitInterval . Maestro.unMaestroRational) protocolParametersMonetaryExpansion
-    , cppTau = THKD $ hkdMap prxy (fromMaybe (error (errPath <> "Treasury expansion parameter received from Maestro is out of bounds")) . Ledger.boundRational @Ledger.UnitInterval . Maestro.unMaestroRational) protocolParametersTreasuryExpansion
-    , cppProtocolVersion = toNoUpdate @f @Ledger.ProtVer $ hkdMap prxy (protocolVersionFromOgmios errPath) protocolParametersVersion
-    , cppMinPoolCost = THKD $ hkdMap prxy (Ledger.Coin . toInteger . Maestro.asLovelaceLovelace . Maestro.asAdaAda) protocolParametersMinStakePoolCost
-    , cppCoinsPerUTxOByte = THKD $ hkdMap prxy (Api.L.CoinPerByte . Ledger.Coin . toInteger @Natural) protocolParametersMinUtxoDepositCoefficient
-    , cppCostModels =
+    , dppNOpt = THKD $ hkdMap prxy (fromIntegral @Natural @Word16) protocolParametersDesiredNumberOfStakePools
+    , dppA0 = THKD $ hkdMap prxy (fromMaybe (error (errPath <> "Pool influence received from Maestro is out of bounds")) . Ledger.boundRational @Ledger.NonNegativeInterval . Maestro.unMaestroRational) protocolParametersStakePoolPledgeInfluence
+    , dppRho = THKD $ hkdMap prxy (fromMaybe (error (errPath <> "Monetory expansion parameter received from Maestro is out of bounds")) . Ledger.boundRational @Ledger.UnitInterval . Maestro.unMaestroRational) protocolParametersMonetaryExpansion
+    , dppTau = THKD $ hkdMap prxy (fromMaybe (error (errPath <> "Treasury expansion parameter received from Maestro is out of bounds")) . Ledger.boundRational @Ledger.UnitInterval . Maestro.unMaestroRational) protocolParametersTreasuryExpansion
+    , dppProtocolVersion = toNoUpdate @f @Ledger.ProtVer $ hkdMap prxy (protocolVersionFromOgmios errPath) protocolParametersVersion
+    , dppMinPoolCost = THKD $ hkdMap prxy (Compactible.toCompactPartial . Ledger.Coin . toInteger . Maestro.asLovelaceLovelace . Maestro.asAdaAda) protocolParametersMinStakePoolCost
+    , dppCoinsPerUTxOByte = THKD $ hkdMap prxy (Api.L.CoinPerByte . Compactible.toCompactPartial . Ledger.Coin . toInteger @Natural) protocolParametersMinUtxoDepositCoefficient
+    , dppCostModels =
         THKD $
           hkdMap
             prxy
@@ -719,7 +732,7 @@ pparamsFromOgmios errPath ProtocolParameters {..} =
                     ]
             )
             protocolParametersPlutusCostModels
-    , cppPrices =
+    , dppPrices =
         THKD $
           hkdMap
             prxy
@@ -730,7 +743,7 @@ pparamsFromOgmios errPath ProtocolParameters {..} =
                   }
             )
             protocolParametersScriptExecutionPrices
-    , cppMaxTxExUnits =
+    , dppMaxTxExUnits =
         THKD $
           hkdMap
             prxy
@@ -744,7 +757,7 @@ pparamsFromOgmios errPath ProtocolParameters {..} =
                     }
             )
             protocolParametersMaxExecutionUnitsPerTransaction
-    , cppMaxBlockExUnits =
+    , dppMaxBlockExUnits =
         THKD $
           hkdMap
             prxy
@@ -758,10 +771,10 @@ pparamsFromOgmios errPath ProtocolParameters {..} =
                     }
             )
             protocolParametersMaxExecutionUnitsPerBlock
-    , cppMaxValSize = THKD $ hkdMap prxy (fromIntegral @Natural @Word32 . Maestro.asBytesBytes) protocolParametersMaxValueSize
-    , cppCollateralPercentage = THKD $ hkdMap prxy (fromIntegral @Natural @Word16) protocolParametersCollateralPercentage
-    , cppMaxCollateralInputs = THKD $ hkdMap prxy (fromIntegral @Natural @Word16) protocolParametersMaxCollateralInputs
-    , cppPoolVotingThresholds =
+    , dppMaxValSize = THKD $ hkdMap prxy (fromIntegral @Natural @Word32 . Maestro.asBytesBytes) protocolParametersMaxValueSize
+    , dppCollateralPercentage = THKD $ hkdMap prxy (fromIntegral @Natural @Word16) protocolParametersCollateralPercentage
+    , dppMaxCollateralInputs = THKD $ hkdMap prxy (fromIntegral @Natural @Word16) protocolParametersMaxCollateralInputs
+    , dppPoolVotingThresholds =
         THKD $
           hkdMap
             prxy
@@ -775,7 +788,7 @@ pparamsFromOgmios errPath ProtocolParameters {..} =
                   }
             )
             protocolParametersStakePoolVotingThresholds
-    , cppDRepVotingThresholds =
+    , dppDRepVotingThresholds =
         THKD $
           hkdMap
             prxy
@@ -794,16 +807,22 @@ pparamsFromOgmios errPath ProtocolParameters {..} =
                   }
             )
             protocolParametersDelegateRepresentativeVotingThresholds
-    , cppCommitteeMinSize = THKD $ hkdMap prxy (fromIntegral @Natural @Word16) protocolParametersConstitutionalCommitteeMinSize
-    , cppCommitteeMaxTermLength = THKD $ hkdMap prxy (Ledger.EpochInterval . fromIntegral @Natural) protocolParametersConstitutionalCommitteeMaxTermLength
-    , cppGovActionLifetime = THKD $ hkdMap prxy (Ledger.EpochInterval . fromIntegral @Natural) protocolParametersGovernanceActionLifetime
-    , cppGovActionDeposit = THKD $ hkdMap prxy (Ledger.Coin . fromIntegral . Maestro.asLovelaceLovelace . Maestro.asAdaAda) protocolParametersGovernanceActionDeposit
-    , cppDRepDeposit = THKD $ hkdMap prxy (Ledger.Coin . fromIntegral . Maestro.asLovelaceLovelace . Maestro.asAdaAda) protocolParametersDelegateRepresentativeDeposit
-    , cppDRepActivity = THKD $ hkdMap prxy (Ledger.EpochInterval . fromIntegral @Natural) protocolParametersDelegateRepresentativeMaxIdleTime
-    , cppMinFeeRefScriptCostPerByte = THKD $ hkdMap prxy (unsafeBoundRational @Ledger.NonNegativeInterval . Maestro.minFeeReferenceScriptsBase) protocolParametersMinFeeReferenceScripts
+    , dppCommitteeMinSize = THKD $ hkdMap prxy (fromIntegral @Natural @Word16) protocolParametersConstitutionalCommitteeMinSize
+    , dppCommitteeMaxTermLength = THKD $ hkdMap prxy (Ledger.EpochInterval . fromIntegral @Natural) protocolParametersConstitutionalCommitteeMaxTermLength
+    , dppGovActionLifetime = THKD $ hkdMap prxy (Ledger.EpochInterval . fromIntegral @Natural) protocolParametersGovernanceActionLifetime
+    , dppGovActionDeposit = THKD $ hkdMap prxy (Compactible.toCompactPartial . Ledger.Coin . fromIntegral . Maestro.asLovelaceLovelace . Maestro.asAdaAda) protocolParametersGovernanceActionDeposit
+    , dppDRepDeposit = THKD $ hkdMap prxy (Compactible.toCompactPartial . Ledger.Coin . fromIntegral . Maestro.asLovelaceLovelace . Maestro.asAdaAda) protocolParametersDelegateRepresentativeDeposit
+    , dppDRepActivity = THKD $ hkdMap prxy (Ledger.EpochInterval . fromIntegral @Natural) protocolParametersDelegateRepresentativeMaxIdleTime
+    , dppMinFeeRefScriptCostPerByte = THKD $ hkdMap prxy (unsafeBoundRational @Ledger.NonNegativeInterval . Maestro.minFeeReferenceScriptsBase) protocolParametersMinFeeReferenceScripts
+    , dppMaxRefScriptSizePerBlock = THKD $ dijkstraParam dijkstraMaxRefScriptSizePerBlock
+    , dppMaxRefScriptSizePerTx = THKD $ dijkstraParam dijkstraMaxRefScriptSizePerTx
+    , dppRefScriptCostStride = THKD $ dijkstraParam dijkstraRefScriptCostStride
+    , dppRefScriptCostMultiplier = THKD $ dijkstraParam dijkstraRefScriptCostMultiplier
     }
  where
   prxy = Proxy @f
+  dijkstraParam :: a -> HKD f a
+  dijkstraParam = dijkstraPParamDefault @f
 
 -- | Fetch protocol parameters.
 ogmiosProtocolParameters :: OgmiosApiEnv -> IO ApiProtocolParameters
@@ -914,6 +933,7 @@ ogmiosEraSummaries env = do
       { boundTime = CTime.RelativeTime $ Maestro.eraBoundTimeSeconds eraBoundTime
       , boundSlot = CSlot.SlotNo $ fromIntegral eraBoundSlot
       , boundEpoch = CSlot.EpochNo $ fromIntegral eraBoundEpoch
+      , boundPerasRound = Ouroboros.NoPerasEnabled
       }
   mkEraParams EraParameters {eraParametersEpochLength, eraParametersSlotLength, eraParametersSafeZone} =
     Ouroboros.EraParams
@@ -921,6 +941,7 @@ ogmiosEraSummaries env = do
       , eraSlotLength = CTime.mkSlotLength $ Maestro.epochSlotLengthMilliseconds eraParametersSlotLength / 1000
       , eraSafeZone = Ouroboros.StandardSafeZone $ fromJust eraParametersSafeZone
       , eraGenesisWin = fromIntegral $ fromJust eraParametersSafeZone -- TODO: Get it from provider? It is supposed to be 3k/f where k is security parameter (at present 2160) and f is active slot coefficient. Usually ledger set the safe zone size such that it guarantees at least k blocks...
+      , eraPerasRoundLength = Ouroboros.NoPerasEnabled
       }
   mkEra EraSummary {eraSummaryStart, eraSummaryEnd, eraSummaryParameters} =
     Ouroboros.EraSummary

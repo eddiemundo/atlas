@@ -25,11 +25,14 @@ import Blockfrost.Client qualified as Blockfrost
 import Cardano.Api qualified as Api
 import Cardano.Api.Ledger qualified as Api.L
 import Cardano.Api.Ledger qualified as Ledger
-import Cardano.Api.Shelley qualified as Api.S
+import Cardano.Api qualified as Api.S
 import Cardano.Ledger.Alonzo.PParams qualified as Ledger
+import Cardano.Ledger.Compactible qualified as Compactible
 import Cardano.Ledger.Conway.PParams (
-  ConwayPParams (..),
   THKD (..),
+ )
+import Cardano.Ledger.Dijkstra.PParams (
+  DijkstraPParams (..),
  )
 import Cardano.Ledger.Plutus qualified as Ledger
 import Cardano.Slotting.Slot qualified as CSlot
@@ -141,7 +144,7 @@ blockfrostAwaitTxConfirmed proj p@GYAwaitTxParameters {..} txId = blpAwaitTx 0
   blpAwaitTx attempt = do
     eTxInfo <- blockfrostQueryTx proj txId
     case eTxInfo of
-      Left Blockfrost.BlockfrostNotFound ->
+      Left (Blockfrost.BlockfrostNotFound _) ->
         threadDelay checkInterval
           >> blpAwaitTx (attempt + 1)
       Left err -> throwBlpvApiError "AwaitTx" err
@@ -154,7 +157,7 @@ blockfrostAwaitTxConfirmed proj p@GYAwaitTxParameters {..} txId = blpAwaitTx 0
   blpAwaitBlock attempt blockHash = do
     eBlockInfo <- blockfrostQueryBlock proj blockHash
     case eBlockInfo of
-      Left Blockfrost.BlockfrostNotFound ->
+      Left (Blockfrost.BlockfrostNotFound _) ->
         threadDelay checkInterval
           >> blpAwaitBlock (attempt + 1) blockHash
       Left err -> throwBlpvApiError "AwaitBlock" err
@@ -257,7 +260,7 @@ blockfrostUtxosAtAddress proj addr mAssetClass = do
  where
   locationIdent = "AddressUtxos"
   -- This particular error is fine in this case, we can just return empty list.
-  handler (Left Blockfrost.BlockfrostNotFound) = pure []
+  handler (Left (Blockfrost.BlockfrostNotFound _)) = pure []
   handler other = handleBlockfrostError locationIdent other
 
 blockfrostUtxosWithAsset :: Blockfrost.Project -> GYNonAdaToken -> IO GYUTxOs
@@ -276,7 +279,7 @@ blockfrostUtxosWithAsset proj ac = do
   locationIdent = "UtxosWithAsset"
   addressFromBlockfrost addr = maybeToRight DeserializeErrorAddress $ addressFromTextMaybe $ Blockfrost.unAddress addr
   -- This particular error is fine in this case, we can just return empty list.
-  handler (Left Blockfrost.BlockfrostNotFound) = pure []
+  handler (Left (Blockfrost.BlockfrostNotFound _)) = pure []
   handler other = handleBlockfrostError locationIdent other
 
 blockfrostUtxosAtPaymentCredential :: Blockfrost.Project -> GYPaymentCredential -> Maybe GYAssetClass -> IO GYUTxOs
@@ -298,7 +301,7 @@ blockfrostUtxosAtPaymentCredential proj cred mAssetClass = do
  where
   locationIdent = "PaymentCredentialUtxos"
   -- This particular error is fine in this case, we can just return empty list.
-  handler (Left Blockfrost.BlockfrostNotFound) = pure []
+  handler (Left (Blockfrost.BlockfrostNotFound _)) = pure []
   handler other = handleBlockfrostError locationIdent other
 
 blockfrostUtxosAtTxOutRef :: Blockfrost.Project -> GYTxOutRef -> IO (Maybe GYUTxO)
@@ -346,7 +349,7 @@ blockfrostUtxosAtTxOutRef proj ref = do
             }
  where
   -- This particular error is fine in this case, we can just return 'Nothing'.
-  handler (Left Blockfrost.BlockfrostNotFound) = pure Nothing
+  handler (Left (Blockfrost.BlockfrostNotFound _)) = pure Nothing
   handler other = handleBlockfrostError locationIdent $ Just <$> other
   locationIdent = "TxUtxos(single)"
 
@@ -372,7 +375,7 @@ blockfrostUtxosAtTxOutRefs proj refs = do
           Blockfrost.getTxUtxos . Blockfrost.TxHash $
             Api.serialiseToRawBytesHexText txId
       case res of
-        Left Blockfrost.BlockfrostNotFound -> pure []
+        Left (Blockfrost.BlockfrostNotFound _) -> pure []
         Left err -> throwError err
         Right (Blockfrost._transactionUtxosOutputs -> outs) ->
           pure $
@@ -419,30 +422,30 @@ blockfrostProtocolParams proj = do
       >>= handleBlockfrostError "ProtocolParams"
   pure $
     Ledger.PParams $
-      ConwayPParams
-        { cppMinFeeA = THKD $ Ledger.Coin _protocolParamsMinFeeA
-        , cppMinFeeB = THKD $ Ledger.Coin _protocolParamsMinFeeB
-        , cppMaxBBSize = THKD $ fromIntegral _protocolParamsMaxBlockSize
-        , cppMaxTxSize = THKD $ fromIntegral _protocolParamsMaxTxSize
-        , cppMaxBHSize = THKD $ fromIntegral _protocolParamsMaxBlockHeaderSize
-        , cppKeyDeposit = THKD $ Ledger.Coin $ lovelacesToInteger _protocolParamsKeyDeposit
-        , cppPoolDeposit = THKD $ Ledger.Coin $ lovelacesToInteger _protocolParamsPoolDeposit
-        , cppEMax =
+      DijkstraPParams
+        { dppTxFeePerByte = THKD $ Api.L.CoinPerByte $ Compactible.toCompactPartial $ Ledger.Coin _protocolParamsMinFeeA
+        , dppTxFeeFixed = THKD $ Compactible.toCompactPartial $ Ledger.Coin _protocolParamsMinFeeB
+        , dppMaxBBSize = THKD $ fromIntegral _protocolParamsMaxBlockSize
+        , dppMaxTxSize = THKD $ fromIntegral _protocolParamsMaxTxSize
+        , dppMaxBHSize = THKD $ fromIntegral _protocolParamsMaxBlockHeaderSize
+        , dppKeyDeposit = THKD $ Compactible.toCompactPartial $ Ledger.Coin $ lovelacesToInteger _protocolParamsKeyDeposit
+        , dppPoolDeposit = THKD $ Compactible.toCompactPartial $ Ledger.Coin $ lovelacesToInteger _protocolParamsPoolDeposit
+        , dppEMax =
             THKD $
               Ledger.EpochInterval . fromIntegral $
                 _protocolParamsEMax
-        , cppNOpt = THKD $ fromIntegral _protocolParamsNOpt
-        , cppA0 = THKD $ fromMaybe (error "GeniusYield.Providers.Blockfrost.blockfrostProtocolParams: pool influence received from Blockfrost is out of bounds") $ Ledger.boundRational _protocolParamsA0
-        , cppRho = THKD $ fromMaybe (error "GeniusYield.Providers.Blockfrost.blockfrostProtocolParams: monetory expansion parameter received from Blockfrost is out of bounds") $ Ledger.boundRational _protocolParamsRho
-        , cppTau = THKD $ fromMaybe (error "GeniusYield.Providers.Blockfrost.blockfrostProtocolParams: treasury expansion parameter received from Blockfrost is out of bounds") $ Ledger.boundRational _protocolParamsTau
-        , cppProtocolVersion =
+        , dppNOpt = THKD $ fromIntegral _protocolParamsNOpt
+        , dppA0 = THKD $ fromMaybe (error "GeniusYield.Providers.Blockfrost.blockfrostProtocolParams: pool influence received from Blockfrost is out of bounds") $ Ledger.boundRational _protocolParamsA0
+        , dppRho = THKD $ fromMaybe (error "GeniusYield.Providers.Blockfrost.blockfrostProtocolParams: monetory expansion parameter received from Blockfrost is out of bounds") $ Ledger.boundRational _protocolParamsRho
+        , dppTau = THKD $ fromMaybe (error "GeniusYield.Providers.Blockfrost.blockfrostProtocolParams: treasury expansion parameter received from Blockfrost is out of bounds") $ Ledger.boundRational _protocolParamsTau
+        , dppProtocolVersion =
             Ledger.ProtVer
               { Ledger.pvMajor = Ledger.mkVersion _protocolParamsProtocolMajorVer & fromMaybe (error "GeniusYield.Providers.Blockfrost.blockfrostProtocolParams: major version received from Blockfrost is out of bounds")
               , Ledger.pvMinor = fromIntegral _protocolParamsProtocolMinorVer
               }
-        , cppMinPoolCost = THKD $ Ledger.Coin $ lovelacesToInteger _protocolParamsMinPoolCost
-        , cppCoinsPerUTxOByte = THKD $ Api.L.CoinPerByte $ Ledger.Coin $ lovelacesToInteger _protocolParamsCoinsPerUtxoSize
-        , cppCostModels =
+        , dppMinPoolCost = THKD $ Compactible.toCompactPartial $ Ledger.Coin $ lovelacesToInteger _protocolParamsMinPoolCost
+        , dppCoinsPerUTxOByte = THKD $ Api.L.CoinPerByte $ Compactible.toCompactPartial $ Ledger.Coin $ lovelacesToInteger _protocolParamsCoinsPerUtxoSize
+        , dppCostModels =
             THKD $
               Ledger.mkCostModels $
                 Map.fromList $
@@ -456,8 +459,8 @@ blockfrostProtocolParams proj = do
                     )
                     []
                     (Blockfrost.unCostModelsRaw _protocolParamsCostModelsRaw)
-        , cppPrices = THKD $ Ledger.Prices {Ledger.prSteps = fromMaybe (error (errPath <> "Couldn't bound Blockfrost's cpu steps")) $ Ledger.boundRational _protocolParamsPriceStep, Ledger.prMem = fromMaybe (error (errPath <> "Couldn't bound Blockfrost's memory units")) $ Ledger.boundRational _protocolParamsPriceMem}
-        , cppMaxTxExUnits =
+        , dppPrices = THKD $ Ledger.Prices {Ledger.prSteps = fromMaybe (error (errPath <> "Couldn't bound Blockfrost's cpu steps")) $ Ledger.boundRational _protocolParamsPriceStep, Ledger.prMem = fromMaybe (error (errPath <> "Couldn't bound Blockfrost's memory units")) $ Ledger.boundRational _protocolParamsPriceMem}
+        , dppMaxTxExUnits =
             THKD $
               Ledger.OrdExUnits $
                 Ledger.ExUnits
@@ -466,7 +469,7 @@ blockfrostProtocolParams proj = do
                   , Ledger.exUnitsMem =
                       fromInteger $ Blockfrost.unQuantity _protocolParamsMaxTxExMem
                   }
-        , cppMaxBlockExUnits =
+        , dppMaxBlockExUnits =
             THKD $
               Ledger.OrdExUnits $
                 Ledger.ExUnits
@@ -475,10 +478,10 @@ blockfrostProtocolParams proj = do
                   , Ledger.exUnitsMem =
                       fromInteger $ Blockfrost.unQuantity _protocolParamsMaxBlockExMem
                   }
-        , cppMaxValSize = THKD $ fromIntegral $ Blockfrost.unQuantity _protocolParamsMaxValSize
-        , cppCollateralPercentage = THKD $ fromIntegral _protocolParamsCollateralPercent
-        , cppMaxCollateralInputs = THKD $ fromIntegral _protocolParamsMaxCollateralInputs
-        , cppPoolVotingThresholds =
+        , dppMaxValSize = THKD $ fromIntegral $ Blockfrost.unQuantity _protocolParamsMaxValSize
+        , dppCollateralPercentage = THKD $ fromIntegral _protocolParamsCollateralPercent
+        , dppMaxCollateralInputs = THKD $ fromIntegral _protocolParamsMaxCollateralInputs
+        , dppPoolVotingThresholds =
             THKD $
               Ledger.PoolVotingThresholds
                 { pvtPPSecurityGroup = unsafeBoundRational $ fj _protocolParamsPvtppSecurityGroup
@@ -487,7 +490,7 @@ blockfrostProtocolParams proj = do
                 , pvtCommitteeNormal = unsafeBoundRational $ fj _protocolParamsPvtCommitteeNormal
                 , pvtCommitteeNoConfidence = unsafeBoundRational $ fj _protocolParamsPvtCommitteeNoConfidence
                 }
-        , cppDRepVotingThresholds =
+        , dppDRepVotingThresholds =
             THKD $
               Ledger.DRepVotingThresholds
                 { dvtUpdateToConstitution = unsafeBoundRational $ fj _protocolParamsDvtUpdateToConstitution
@@ -501,13 +504,17 @@ blockfrostProtocolParams proj = do
                 , dvtCommitteeNormal = unsafeBoundRational $ fj _protocolParamsDvtCommitteeNormal
                 , dvtCommitteeNoConfidence = unsafeBoundRational $ fj _protocolParamsDvtCommitteeNoConfidence
                 }
-        , cppCommitteeMinSize = THKD $ fromIntegral $ unQuantity $ fj _protocolParamsCommitteeMinSize
-        , cppCommitteeMaxTermLength = THKD (Ledger.EpochInterval $ fromIntegral $ unQuantity $ fj _protocolParamsCommitteeMaxTermLength)
-        , cppGovActionLifetime = THKD (Ledger.EpochInterval $ fromIntegral $ unQuantity $ fj _protocolParamsGovActionLifetime)
-        , cppGovActionDeposit = THKD $ Ledger.Coin $ fromIntegral $ lovelacesToInteger $ fj _protocolParamsGovActionDeposit
-        , cppDRepDeposit = THKD $ Ledger.Coin $ fromIntegral $ lovelacesToInteger $ fj _protocolParamsDrepDeposit
-        , cppDRepActivity = THKD (Ledger.EpochInterval $ fromIntegral $ unQuantity $ fj _protocolParamsDrepActivity)
-        , cppMinFeeRefScriptCostPerByte = THKD $ unsafeBoundRational $ fj _protocolParamsMinFeeRefScriptCostPerByte
+        , dppCommitteeMinSize = THKD $ fromIntegral $ unQuantity $ fj _protocolParamsCommitteeMinSize
+        , dppCommitteeMaxTermLength = THKD (Ledger.EpochInterval $ fromIntegral $ unQuantity $ fj _protocolParamsCommitteeMaxTermLength)
+        , dppGovActionLifetime = THKD (Ledger.EpochInterval $ fromIntegral $ unQuantity $ fj _protocolParamsGovActionLifetime)
+        , dppGovActionDeposit = THKD $ Compactible.toCompactPartial $ Ledger.Coin $ lovelacesToInteger $ fj _protocolParamsGovActionDeposit
+        , dppDRepDeposit = THKD $ Compactible.toCompactPartial $ Ledger.Coin $ lovelacesToInteger $ fj _protocolParamsDrepDeposit
+        , dppDRepActivity = THKD (Ledger.EpochInterval $ fromIntegral $ unQuantity $ fj _protocolParamsDrepActivity)
+        , dppMinFeeRefScriptCostPerByte = THKD $ unsafeBoundRational $ fj _protocolParamsMinFeeRefScriptCostPerByte
+        , dppMaxRefScriptSizePerBlock = THKD dijkstraMaxRefScriptSizePerBlock
+        , dppMaxRefScriptSizePerTx = THKD dijkstraMaxRefScriptSizePerTx
+        , dppRefScriptCostStride = THKD dijkstraRefScriptCostStride
+        , dppRefScriptCostMultiplier = THKD dijkstraRefScriptCostMultiplier
         }
  where
   errPath = "GeniusYield.Providers.Blockfrost.blockfrostProtocolParams: "
@@ -524,7 +531,7 @@ blockfrostStakePools proj = do
   -- The pool ids returned by blockfrost are in bech32.
   let poolIdsEith =
         traverse
-          (Api.deserialiseFromBech32 (Api.proxyToAsType $ Proxy @Api.S.PoolId) . Blockfrost.unPoolId)
+          (Api.deserialiseFromBech32 . Blockfrost.unPoolId)
           stkPools
   case poolIdsEith of
     -- Deserialization failure shouldn't happen on blockfrost returned pool id.
@@ -548,6 +555,7 @@ blockfrostEraHistory proj = do
       { boundTime = CTime.RelativeTime _boundTime
       , boundSlot = CSlot.SlotNo $ fromIntegral _boundSlot
       , boundEpoch = CSlot.EpochNo $ fromIntegral _boundEpoch
+      , boundPerasRound = Ouroboros.NoPerasEnabled
       }
   mkEraParams Blockfrost.NetworkEraParameters {_parametersEpochLength, _parametersSlotLength, _parametersSafeZone} =
     Ouroboros.EraParams
@@ -555,6 +563,7 @@ blockfrostEraHistory proj = do
       , eraSlotLength = CTime.mkSlotLength _parametersSlotLength
       , eraSafeZone = Ouroboros.StandardSafeZone _parametersSafeZone
       , eraGenesisWin = fromIntegral _parametersSafeZone -- TODO: Get it from provider? It is supposed to be 3k/f where k is security parameter (at present 2160) and f is active slot coefficient. Usually ledger set the safe zone size such that it guarantees at least k blocks...
+      , eraPerasRoundLength = Ouroboros.NoPerasEnabled
       }
   mkEra Blockfrost.NetworkEraSummary {_networkEraStart, _networkEraEnd, _networkEraParameters} =
     Ouroboros.EraSummary
@@ -585,7 +594,7 @@ blockfrostLookupDatum p dh = do
     datumMaybe
  where
   -- This particular error is fine in this case, we can just return 'Nothing'.
-  handler (Left Blockfrost.BlockfrostNotFound) = pure Nothing
+  handler (Left (Blockfrost.BlockfrostNotFound _)) = pure Nothing
   handler other = handleBlockfrostError locationIdent $ Just <$> other
   locationIdent = "LookupDatum"
 
@@ -598,7 +607,7 @@ blockfrostStakeAddressInfo p saddr = do
   Blockfrost.runBlockfrost p (Blockfrost.getAccount (Blockfrost.mkAddress $ stakeAddressToText saddr)) >>= handler
  where
   -- This particular error is fine.
-  handler (Left Blockfrost.BlockfrostNotFound) = pure Nothing
+  handler (Left (Blockfrost.BlockfrostNotFound _)) = pure Nothing
   handler other =
     handleBlockfrostError "Account" $
       other <&> \accInfo ->

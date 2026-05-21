@@ -5,6 +5,8 @@ License     : Apache 2.0
 Maintainer  : support@geniusyield.co
 Stability   : develop
 -}
+{-# OPTIONS_GHC -Wno-identities #-}
+
 module GeniusYield.Types.Rational (
   GYRational,
   rationalFromGHC,
@@ -50,10 +52,10 @@ rationalToGHC :: GYRational -> Rational
 rationalToGHC = coerce
 
 rationalFromPlutus :: Plutus.Rational -> GYRational
-rationalFromPlutus = rationalFromGHC . Plutus.toGHC
+rationalFromPlutus = rationalFromGHC . Plutus.toHaskellRatio
 
 rationalToPlutus :: GYRational -> Plutus.Rational
-rationalToPlutus = Plutus.fromGHC . rationalToGHC
+rationalToPlutus = Plutus.fromHaskellRatio . rationalToGHC
 
 {- |
 

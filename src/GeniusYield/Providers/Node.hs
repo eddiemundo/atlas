@@ -27,7 +27,7 @@ module GeniusYield.Providers.Node (
 
 import Cardano.Api qualified as Api
 import Cardano.Api.Ledger qualified as Ledger
-import Cardano.Api.Shelley qualified as Api.S
+import Cardano.Api qualified as Api.S
 import Cardano.Ledger.Api.State.Query qualified as Ledger
 import Cardano.Slotting.Time (SystemStart)
 import Control.Exception (throwIO)
@@ -39,7 +39,6 @@ import Data.Text qualified as Txt
 import GeniusYield.CardanoApi.Query
 import GeniusYield.Providers.Common (SubmitTxException (SubmitTxException), makeLastEraEndUnbounded)
 import GeniusYield.Types
-import Ouroboros.Network.Protocol.LocalTxSubmission.Type (SubmitResult (..))
 
 -------------------------------------------------------------------------------
 -- Submit
@@ -48,10 +47,11 @@ import Ouroboros.Network.Protocol.LocalTxSubmission.Type (SubmitResult (..))
 nodeSubmitTx :: Api.LocalNodeConnectInfo -> GYSubmitTx
 nodeSubmitTx info tx = do
   -- We may submit transaction in older eras as well, it seems.
-  res <- Api.submitTxToNodeLocal info $ Api.TxInMode Api.ShelleyBasedEraConway (txToApi tx)
+  res <- Api.submitTxToNodeLocal info $ Api.TxInMode apiSBE (txToApi tx)
   case res of
-    SubmitSuccess -> return $ txIdFromApi $ Api.getTxId $ Api.getTxBody $ txToApi tx
-    SubmitFail err -> throwIO $ SubmitTxException $ Txt.pack $ show err
+    Api.TxSubmitSuccess -> return $ txIdFromApi $ Api.getTxId $ Api.getTxBody $ txToApi tx
+    Api.TxSubmitFail err -> throwIO $ SubmitTxException $ Txt.pack $ show err
+    Api.TxSubmitError err -> throwIO $ SubmitTxException $ Txt.pack $ show err
 
 -------------------------------------------------------------------------------
 -- Current slot
@@ -144,7 +144,7 @@ nodeMempoolTxs info = do
    where
     finaliseAcc = reverse
   getGYTx :: Api.TxInMode -> Maybe GYTx
-  getGYTx (Api.TxInMode Api.ShelleyBasedEraConway tx) = Just $ txFromApi tx
+  getGYTx (Api.TxInMode Api.ShelleyBasedEraDijkstra tx) = Just $ txFromApi tx
   getGYTx _anyOther = Nothing
 
 -------------------------------------------------------------------------------

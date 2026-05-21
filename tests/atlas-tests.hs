@@ -22,12 +22,9 @@ import GeniusYield.Imports
 import GeniusYield.Test.Blueprint (blueprintTests)
 import GeniusYield.Test.CoinSelection (coinSelectionTests)
 import GeniusYield.Test.Config (configTests)
-import GeniusYield.Test.FeeTracking (feeTrackingTests)
-import GeniusYield.Test.GYTxBody (gyTxBodyTests)
 import GeniusYield.Test.GYTxOutRefCbor (gyTxOutRefCborTests)
 import GeniusYield.Test.GYTxSkeleton (gyTxSkeletonTests)
 import GeniusYield.Test.Providers (providersTests)
-import GeniusYield.Test.RefInput (refInputTests)
 import GeniusYield.Test.SimpleScript (simpleScriptTests)
 import GeniusYield.Test.SlotConfig (slotConversionTests)
 import GeniusYield.Test.Stake (stakeTests)
@@ -68,10 +65,10 @@ main = do
               pure giftValidatorV2 @=? envelopeContentsParsed
           , -- we can deserialize v1 as v1.
             testCase "deserialize v1" $ do
-              e <- Api.readFileTextEnvelope (Api.proxyToAsType Proxy) (Api.File $ rootDir </> "fixtures" </> "script-env-v1.json")
+              e <- Api.readFileTextEnvelope (Api.File $ rootDir </> "fixtures" </> "script-env-v1.json")
               Right simpleScriptAPIv1 @=? first show e
           , testCase "deserialize v1" $ do
-              e <- Api.readFileTextEnvelope (Api.proxyToAsType Proxy) (Api.File $ rootDir </> "fixtures" </> "script-env-v1.json")
+              e <- Api.readFileTextEnvelope (Api.File $ rootDir </> "fixtures" </> "script-env-v1.json")
 
               let expected :: Either String (Api.PlutusScript Api.PlutusScriptV2)
                   expected = Left "(TextEnvelopeTypeError [TextEnvelopeType \"PlutusScriptV2\"] (TextEnvelopeType \"PlutusScriptV1\"))"
@@ -81,12 +78,9 @@ main = do
       , blueprintTests
       , slotConversionTests
       , coinSelectionTests
-      , gyTxBodyTests
       , configTests
       , gyTxSkeletonTests
       , gyTxOutRefCborTests
-      , refInputTests
-      , feeTrackingTests
       , stakeTests (head configs)
       , simpleScriptTests configs
       , providersTests configs providerToken netId

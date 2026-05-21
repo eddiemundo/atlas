@@ -50,7 +50,7 @@ import PlutusLedgerApi.V1.Scripts qualified as Plutus
 import PlutusTx qualified
 import PlutusTx.Builtins qualified as PlutusTx
 
-import Cardano.Api.Shelley qualified as Api
+import Cardano.Api qualified as Api
 import GeniusYield.Imports
 import GeniusYield.Types.Ledger
 import Web.HttpApiData qualified as Web

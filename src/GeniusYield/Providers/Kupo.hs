@@ -152,9 +152,9 @@ instance FromJSON KupoDatum where
           )
           v
 
-data KupoScriptLanguage = Native | PlutusV1 | PlutusV2 | PlutusV3
+data KupoScriptLanguage = Native | PlutusV1 | PlutusV2 | PlutusV3 | PlutusV4
   deriving stock (Eq, Ord, Show, Generic)
-  deriving FromJSON via CustomJSON '[ConstructorTagModifier '[Rename "Native" "native", Rename "PlutusV1" "plutus:v1", Rename "PlutusV2" "plutus:v2", Rename "PlutusV3" "plutus:v3"]] KupoScriptLanguage
+  deriving FromJSON via CustomJSON '[ConstructorTagModifier '[Rename "Native" "native", Rename "PlutusV1" "plutus:v1", Rename "PlutusV2" "plutus:v2", Rename "PlutusV3" "plutus:v3", Rename "PlutusV4" "plutus:v4"]] KupoScriptLanguage
 
 newtype KupoScript = KupoScript (Maybe GYAnyScript)
   deriving stock (Eq, Show, Generic)
@@ -183,6 +183,7 @@ instance FromJSON KupoScript where
                 PlutusV1 -> pure $ KupoScript $ GYPlutusScript <$> scriptFromCBOR @'GYTypes.PlutusV1 scriptHex
                 PlutusV2 -> pure $ KupoScript $ GYPlutusScript <$> scriptFromCBOR @'GYTypes.PlutusV2 scriptHex
                 PlutusV3 -> pure $ KupoScript $ GYPlutusScript <$> scriptFromCBOR @'GYTypes.PlutusV3 scriptHex
+                PlutusV4 -> pure $ KupoScript $ GYPlutusScript <$> scriptFromCBOR @'GYTypes.PlutusV4 scriptHex
           )
           v
 

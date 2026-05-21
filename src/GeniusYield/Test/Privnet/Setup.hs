@@ -18,7 +18,7 @@ module GeniusYield.Test.Privnet.Setup (
   cardanoDefaultTestnetOptionsConway,
   cardanoDefaultTestnetNodeOptions,
   CardanoTestnetOptions (..),
-  TestnetNodeOptions (..),
+  NodeOption (..),
   NodeLoggingFormat (..),
 ) where
 
@@ -79,7 +79,7 @@ The first argument is the log severity filter. Only logs of this severity or hig
 newtype Setup = Setup (GYLogSeverity -> (String -> IO ()) -> (Ctx -> IO ()) -> IO ())
 
 cardanoDefaultTestnetOptionsConway :: (CardanoTestnetOptions, GenesisOptions)
-cardanoDefaultTestnetOptionsConway = (def {cardanoNodeEra = Api.AnyShelleyBasedEra Api.ShelleyBasedEraConway}, def {genesisEpochLength = 2000})
+cardanoDefaultTestnetOptionsConway = (def {cardanoNodeEra = apiAnyShelleyBasedEra}, def {genesisEpochLength = 2000})
 data PrivnetRuntime = PrivnetRuntime
   { runtimeNodeSocket :: !FilePath
   , runtimeNetworkInfo :: !GYNetworkInfo
@@ -370,16 +370,8 @@ withPrivnet (testnetOpts, genesisOpts) setupUser = do
       let setup = Setup $ \targetSev putLog kont -> kont $ ctx {ctxLog = simpleLogging targetSev (putLog . Txt.unpack)}
       setupUser setup
  where
-  -- \| This is defined same as `cardanoTestnetDefault` except we use our own conway genesis parameters.
-  cardanoTestnet' testnetOptions genesisOptions conf ctxCommittee = do
-    -- -- FIXME: Instead of `DefaultedOrigin`, this should be `UserProvidedOrigin` but for now that is leading to issues, see https://github.com/IntersectMBO/cardano-node/issues/6130#issuecomment-2692010489. Issue at Atlas side: https://github.com/geniusyield/atlas/issues/415.
-    cardanoTestnet
-      testnetOptions
-      genesisOptions
-      NoUserProvidedData
-      NoUserProvidedData
-      (UserProvidedData (conwayGenesis defaultConwayGenesis ctxCommittee))
-      conf
+  cardanoTestnet' testnetOptions genesisOptions conf _ctxCommittee =
+    createAndRunTestnet testnetOptions genesisOptions conf
 
 -------------------------------------------------------------------------------
 -- Generating users
@@ -399,7 +391,7 @@ generateUser network = do
       addr =
         addressFromApi' $
           Api.AddressInEra
-            (Api.ShelleyAddressInEra Api.ShelleyBasedEraConway)
+            (Api.ShelleyAddressInEra apiSBE)
             ( Api.makeShelleyAddress
                 (networkIdToApi network)
                 (Api.PaymentCredentialByKey vkeyHash)

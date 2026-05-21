@@ -28,7 +28,7 @@ module GeniusYield.Types.KeyHash (
 
 import Cardano.Api qualified as Api
 import Cardano.Api.Ledger qualified as Ledger
-import Cardano.Api.Shelley qualified as Api
+import Cardano.Api qualified as Api
 import Cardano.Crypto.Hash.Class qualified as Crypto
 import Cardano.Ledger.Keys qualified as Ledger
 import Control.Lens ((?~))

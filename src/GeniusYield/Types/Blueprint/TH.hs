@@ -210,6 +210,7 @@ uponBPTypes fp = do
         PlutusV1 -> 'PlutusV1
         PlutusV2 -> 'PlutusV2
         PlutusV3 -> 'PlutusV3
+        PlutusV4 -> 'PlutusV4
       getScript = mkName "scriptFromBPSerialisedScript"
       scriptParamName = mkName "s"
   bodyGetScript :: Exp <- [|scriptFromSerialisedScript $(varE scriptParamName)|]

@@ -1,6 +1,5 @@
 module GeniusYield.Test.Unified.BetRef.PlaceBet (
   placeBetTests,
-  placeBetTestsClb,
   runDeployScript,
   runMultipleBets,
   Bet,
@@ -21,7 +20,6 @@ import Test.Tasty (
 import GeniusYield.HTTP.Errors
 import GeniusYield.Imports
 import GeniusYield.OnChain.BetRef.Types
-import GeniusYield.Test.Clb
 import GeniusYield.Test.Privnet.Setup
 import GeniusYield.Test.Unified.BetRef.Operations
 import GeniusYield.Test.Utils
@@ -40,17 +38,6 @@ betUntilDelta :: Integer
 betUntilDelta = 300
 betRevealDelta :: Integer
 betRevealDelta = 300
-
--- | Test suite for the emulator
-placeBetTestsClb :: TestTree
-placeBetTestsClb =
-  testGroup
-    "Place bet"
-    [ mkTestFor "Simple tx" simpleTxTest
-    , mkTestFor "Placing first bet" firstBetTest'
-    , mkTestFor "Multiple bets" multipleBetsTest
-    , mkTestFor "Multiple bets - to small step" $ mustFail . failingMultipleBetsTest
-    ]
 
 -- | Test suite for a private testnet
 placeBetTests :: Setup -> TestTree

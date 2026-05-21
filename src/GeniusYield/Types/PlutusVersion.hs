@@ -19,7 +19,7 @@ module GeniusYield.Types.PlutusVersion (
 ) where
 
 import Cardano.Api qualified as Api
-import Cardano.Api.Shelley qualified as Api.S
+import Cardano.Api qualified as Api.S
 import Data.GADT.Compare
 import GeniusYield.Imports
 
@@ -27,22 +27,26 @@ data PlutusVersion
   = PlutusV1
   | PlutusV2
   | PlutusV3
+  | PlutusV4
   deriving (Eq, Ord, Show)
 
 data SingPlutusVersion (v :: PlutusVersion) where
   SingPlutusV1 :: SingPlutusVersion 'PlutusV1
   SingPlutusV2 :: SingPlutusVersion 'PlutusV2
   SingPlutusV3 :: SingPlutusVersion 'PlutusV3
+  SingPlutusV4 :: SingPlutusVersion 'PlutusV4
 
 class SingPlutusVersionI (v :: PlutusVersion) where singPlutusVersion :: SingPlutusVersion v
 instance SingPlutusVersionI 'PlutusV1 where singPlutusVersion = SingPlutusV1
 instance SingPlutusVersionI 'PlutusV2 where singPlutusVersion = SingPlutusV2
 instance SingPlutusVersionI 'PlutusV3 where singPlutusVersion = SingPlutusV3
+instance SingPlutusVersionI 'PlutusV4 where singPlutusVersion = SingPlutusV4
 
 instance GEq SingPlutusVersion where
   geq SingPlutusV1 SingPlutusV1 = Just Refl
   geq SingPlutusV2 SingPlutusV2 = Just Refl
   geq SingPlutusV3 SingPlutusV3 = Just Refl
+  geq SingPlutusV4 SingPlutusV4 = Just Refl
   geq _ _ = Nothing
 
 instance GCompare SingPlutusVersion where
@@ -54,18 +58,24 @@ instance GCompare SingPlutusVersion where
   gcompare SingPlutusV3 SingPlutusV1 = GGT
   gcompare SingPlutusV3 SingPlutusV2 = GGT
   gcompare SingPlutusV3 SingPlutusV3 = GEQ
+  gcompare SingPlutusV3 _ = GLT
+  gcompare SingPlutusV4 SingPlutusV4 = GEQ
+  gcompare SingPlutusV4 _ = GGT
 
 type family PlutusVersionToApi (v :: PlutusVersion) :: Type where
   PlutusVersionToApi 'PlutusV1 = Api.PlutusScriptV1
   PlutusVersionToApi 'PlutusV2 = Api.PlutusScriptV2
   PlutusVersionToApi 'PlutusV3 = Api.PlutusScriptV3
+  PlutusVersionToApi 'PlutusV4 = Api.PlutusScriptV4
 
 singPlutusVersionToApi :: SingPlutusVersion v -> Api.S.PlutusScriptVersion (PlutusVersionToApi v)
 singPlutusVersionToApi SingPlutusV1 = Api.PlutusScriptV1
 singPlutusVersionToApi SingPlutusV2 = Api.PlutusScriptV2
 singPlutusVersionToApi SingPlutusV3 = Api.PlutusScriptV3
+singPlutusVersionToApi SingPlutusV4 = Api.PlutusScriptV4
 
 fromSingPlutusVersion :: SingPlutusVersion v -> PlutusVersion
+fromSingPlutusVersion SingPlutusV4 = PlutusV4
 fromSingPlutusVersion SingPlutusV3 = PlutusV3
 fromSingPlutusVersion SingPlutusV2 = PlutusV2
 fromSingPlutusVersion SingPlutusV1 = PlutusV1
@@ -80,7 +90,9 @@ type family CmpPlutusVersion (v :: PlutusVersion) (u :: PlutusVersion) :: Orderi
   CmpPlutusVersion 'PlutusV3 'PlutusV1 = 'GT
   CmpPlutusVersion 'PlutusV3 'PlutusV2 = 'GT
   CmpPlutusVersion 'PlutusV3 'PlutusV3 = 'EQ
-  CmpPlutusVersion v v = 'EQ
+  CmpPlutusVersion 'PlutusV3 _ = 'LT
+  CmpPlutusVersion 'PlutusV4 'PlutusV4 = 'EQ
+  CmpPlutusVersion 'PlutusV4 _ = 'GT
 
 type family GreaterOrEqual (v :: Ordering) :: Bool where
   GreaterOrEqual 'GT = 'True

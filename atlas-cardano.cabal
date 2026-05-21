@@ -50,7 +50,16 @@ common common
 
   ghc-options:
     -Wall
+    -Werror
     -Wincomplete-uni-patterns
+    -Wincomplete-record-updates
+    -Wmissing-home-modules
+    -Widentities
+    -Wredundant-constraints
+    -Wcpp-undef
+    -Wno-name-shadowing
+    -Wno-unused-top-binds
+    -Wno-unused-imports
     -Wunused-packages
 
   -- speed-ups GHCi considerably
@@ -88,7 +97,6 @@ library
     GeniusYield.ReadJSON
     GeniusYield.Scripts.TestToken
     GeniusYield.Swagger.Utils
-    GeniusYield.Test.Clb
     GeniusYield.Test.FakeCoin
     GeniusYield.Test.FeeTracker
     GeniusYield.Test.Privnet.Asserts
@@ -232,7 +240,6 @@ library
     mtl,
     network-uri,
     postgresql-simple,
-    prettyprinter,
     raven-haskell,
     resourcet,
     safe-money,
@@ -243,7 +250,7 @@ library
     some,
     sop-extras,
     stm,
-    strict-mvar,
+    io-classes:strict-mvar,
     string-conv,
     swagger2,
     tasty,
@@ -261,14 +268,13 @@ library
   -- Dependencies whose version is fixed/constrained by @cabal.project@ file.
   build-depends:
     bech32,
-    clb,
     maestro-sdk,
     openapi3,
 
   -- Cardano libraries which are not on hackage. Their version is pinned in @cabal.project@ file or derived from other related dependencies.
   build-depends:
     cardano-addresses,
-    cardano-api ^>=10.13.1,
+    cardano-api ^>=11.0.0,
     cardano-crypto,
     cardano-crypto-class,
     cardano-ledger-alonzo,
@@ -278,12 +284,12 @@ library
     cardano-ledger-conway,
     cardano-ledger-core,
     cardano-ledger-core:{cardano-ledger-core, testlib},
+    cardano-ledger-dijkstra,
     cardano-ledger-shelley,
     cardano-slotting,
     cardano-testnet,
-    ouroboros-consensus,
-    ouroboros-consensus-cardano,
-    ouroboros-network-protocols,
+    ouroboros-consensus:{cardano, ouroboros-consensus},
+    ouroboros-network:protocols,
     plutus-ledger-api,
     plutus-tx,
 
@@ -306,14 +312,11 @@ test-suite atlas-tests
     GeniusYield.Test.BuildTxBodyContent
     GeniusYield.Test.CoinSelection
     GeniusYield.Test.Config
-    GeniusYield.Test.FeeTracking
-    GeniusYield.Test.GYTxBody
     GeniusYield.Test.GYTxOutRefCbor
     GeniusYield.Test.GYTxSkeleton
     GeniusYield.Test.Hydra
     GeniusYield.Test.Providers
     GeniusYield.Test.Providers.Mashup
-    GeniusYield.Test.RefInput
     GeniusYield.Test.SimpleScript
     GeniusYield.Test.SlotConfig
     GeniusYield.Test.Stake
@@ -323,20 +326,16 @@ test-suite atlas-tests
     MonadRandom,
     aeson,
     atlas-cardano,
-    atlas-onchain-common,
     base,
     bytestring,
     cardano-api,
-    clb,
     containers,
     data-default,
     directory,
-    file-embed,
     filepath,
     http-api-data,
     maestro-sdk,
     ouroboros-consensus,
-    plutus-tx,
     tasty,
     tasty-hunit,
     tasty-quickcheck,
