@@ -40,6 +40,13 @@ source-repository-package
   --tag: 1e84ccb43aa0f56dd2776e64a9a7341441fc623e
   --sha256: sha256-O9WSVdqZfKYHt5IBCF3+nknswNl/VH8/FTmTW/iAgb8=
 
+-- Use cardano-testnet from the cardano-node 11.0.1 source tree.
+source-repository-package
+  type: git
+  location: https://github.com/IntersectMBO/cardano-node
+  tag: 11.0.1
+  subdir: cardano-testnet
+
 package postgresql-libpq
   flags: +use-pkg-config
 

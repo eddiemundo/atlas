@@ -17,7 +17,8 @@ module GeniusYield.Test.Privnet.Setup (
   -- * "Cardano.Testnet" re-exports
   cardanoDefaultTestnetOptionsConway,
   cardanoDefaultTestnetNodeOptions,
-  CardanoTestnetOptions (..),
+  TestnetCreationOptions (..),
+  TestnetRuntimeOptions (..),
   NodeOption (..),
   NodeLoggingFormat (..),
 ) where
@@ -78,8 +79,14 @@ The first argument is the log severity filter. Only logs of this severity or hig
 -}
 newtype Setup = Setup (GYLogSeverity -> (String -> IO ()) -> (Ctx -> IO ()) -> IO ())
 
-cardanoDefaultTestnetOptionsConway :: (CardanoTestnetOptions, GenesisOptions)
-cardanoDefaultTestnetOptionsConway = (def {cardanoNodeEra = apiAnyShelleyBasedEra}, def {genesisEpochLength = 2000})
+cardanoDefaultTestnetOptionsConway :: (TestnetCreationOptions, TestnetRuntimeOptions)
+cardanoDefaultTestnetOptionsConway =
+  ( def
+      { creationEra = apiAnyShelleyBasedEra
+      , creationGenesisOptions = def {genesisEpochLength = 2000}
+      }
+  , def
+  )
 data PrivnetRuntime = PrivnetRuntime
   { runtimeNodeSocket :: !FilePath
   , runtimeNetworkInfo :: !GYNetworkInfo
@@ -182,16 +189,17 @@ conwayGenesis cg ctxCommittee =
 
 {- | Spawn a resource managed privnet and do things with it (closing it in the end).
 
-Privnet can be configured using "Cardano.Testnet.CardanoTestnetOptions". Pass 'cardanoDefaultTestnetOptionsConway'
+Privnet can be configured using "Cardano.Testnet.TestnetCreationOptions" and "Cardano.Testnet.TestnetRuntimeOptions".
+Pass 'cardanoDefaultTestnetOptionsConway'
 for default configuration.
 
-Note that passed @CardanoTestnetOptions@ must imply Conway era.
+Note that passed @TestnetCreationOptions@ must imply Conway era.
 
 Returns continuation on `Setup`, which is essentially a function that performs an action
 given a logging -- function and the action itself (which receives the Privnet Ctx).
 -}
-withPrivnet :: (CardanoTestnetOptions, GenesisOptions) -> (Setup -> IO ()) -> IO ()
-withPrivnet (testnetOpts, genesisOpts) setupUser = do
+withPrivnet :: (TestnetCreationOptions, TestnetRuntimeOptions) -> (Setup -> IO ()) -> IO ()
+withPrivnet (creationOpts, runtimeOpts) setupUser = do
   coldCommitteeMembers :: [GYSigningKey 'GYKeyRoleColdCommittee] <- replicateM 3 generateSigningKey
   let ctxCommittee :: CtxCommittee
       ctxCommittee =
@@ -216,7 +224,7 @@ withPrivnet (testnetOpts, genesisOpts) setupUser = do
       , testnetNodes
       , testnetMagic
       } <-
-      cardanoTestnet' testnetOpts genesisOpts conf ctxCommittee
+      cardanoTestnet' creationOpts runtimeOpts conf ctxCommittee
 
     liftIO . STM.atomically $
       STM.writeTMVar
@@ -231,7 +239,7 @@ withPrivnet (testnetOpts, genesisOpts) setupUser = do
                 $ head testnetNodes
           , runtimeNetworkInfo =
               GYNetworkInfo
-                { gyNetworkEpochSlots = fromIntegral $ genesisEpochLength genesisOpts
+                { gyNetworkEpochSlots = fromIntegral . genesisEpochLength . creationGenesisOptions $ creationOpts
                 , gyNetworkMagic = fromIntegral testnetMagic
                 }
           , runtimeWallets = wallets
@@ -370,8 +378,8 @@ withPrivnet (testnetOpts, genesisOpts) setupUser = do
       let setup = Setup $ \targetSev putLog kont -> kont $ ctx {ctxLog = simpleLogging targetSev (putLog . Txt.unpack)}
       setupUser setup
  where
-  cardanoTestnet' testnetOptions genesisOptions conf _ctxCommittee =
-    createAndRunTestnet testnetOptions genesisOptions conf
+  cardanoTestnet' creationOptions runtimeOptions conf _ctxCommittee =
+    createAndRunTestnet creationOptions runtimeOptions conf
 
 -------------------------------------------------------------------------------
 -- Generating users
