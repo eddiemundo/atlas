@@ -44,8 +44,9 @@ source-repository-package
 source-repository-package
   type: git
   location: https://github.com/IntersectMBO/cardano-node
-  tag: 11.0.1
+  tag: 704cd2e4c2ffa84cc2fb4a54ba98b849054baa9c
   subdir: cardano-testnet
+  --sha256: 0044gmz2vbdxmr5v01cs4xn72ff0cwi9f7xqh41c5p7v8bw1vnpr
 
 package postgresql-libpq
   flags: +use-pkg-config
