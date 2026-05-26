@@ -50,6 +50,7 @@ import GeniusYield.TxBuilder.Errors
 import GeniusYield.TxBuilder.Query.Class
 import GeniusYield.Types
 import GeniusYield.Types.TxCert.Internal (GYTxCert (..))
+import qualified Data.List as List
 
 -------------------------------------------------------------------------------
 -- Transaction skeleton
@@ -174,7 +175,18 @@ instance Semigroup (GYTxSkeleton v) where
       }
    where
     -- we keep only one input per utxo to spend
-    combineIns u v = nubBy ((==) `on` gyTxInTxOutRef) (u ++ v)
+    -- JS: actually if we have duplicate inputs we would rather keep the one
+    -- with a script witness, even if it doesn't make sense to for one to
+    -- have a script witness and the other not to
+    combineIns u v = do
+      let (hasWcriptWitnesses, hasKeyWitnesses) = List.partition (\GYTxIn{gyTxInWitness} ->
+            gyTxInWitness & \case
+              GYTxInWitnessScript{} -> True
+              GYTxInWitnessSimpleScript{} -> True
+              GYTxInWitnessKey{} -> False
+            ) (u ++ v)
+      nubBy ((==) `on` gyTxInTxOutRef) (hasWcriptWitnesses ++ hasKeyWitnesses)
+
     -- we cannot combine redeemers, so we just pick first.
     combineMint = Map.unionWith (\(amt, r) (amt', _r) -> (Map.unionWith (+) amt amt', r))
     -- we keep only one withdrawal per stake address
