@@ -430,7 +430,7 @@ collateralValue = valueFromLovelace collateralLovelace
 
 -- | What is the maximum possible collateral requirement as per current protocol parameters?
 maximumRequiredCollateralLovelace :: ApiProtocolParameters -> Int -> Integer
-maximumRequiredCollateralLovelace pp refScriptSize = ceiling $ fromIntegral (maximumFee pp refScriptSize) * ((pp ^. Ledger.ppCollateralPercentageL) % 100)
+maximumRequiredCollateralLovelace pp refScriptSize = ceiling $ fromIntegral (maximumFee pp refScriptSize) * (toInteger (pp ^. Ledger.ppCollateralPercentageL) % 100)
 
 {-# INLINEABLE maximumFee #-}
 
